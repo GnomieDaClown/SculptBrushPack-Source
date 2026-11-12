@@ -5,6 +5,7 @@
 
 #include "SculptBrushPackMorphBrushes.h"
 
+#include "Algo/Partition.h"
 #include "AssetUtils/Texture2DUtil.h"
 #include "Async/ParallelFor.h"
 #include "Engine/Texture2D.h"
@@ -32,6 +33,9 @@ namespace Private
 
 	// The rounds of multiplying by which the way the surface is squeezed is found from its shortened edges.
 	constexpr int32 SqueezeRounds = 32;
+
+	// The nearest-point finder looks at a range of this many points or fewer one by one, without splitting it further.
+	constexpr int32 NearestLeafSize = 8;
 
 	/** The tool's falloff at Position, times its alpha when it has one. */
 	static double EvaluateWeight(const FMeshSculptBrushOp& Op, const FSculptBrushStamp& Stamp, const FVector3d& Position)
@@ -323,6 +327,296 @@ void FMirrorMorphBrushOp::ApplyStamp(const FDynamicMesh3* Mesh, const FSculptBru
 		bToldOfNoPartner = true;
 		Context->ReportProblem(LOCTEXT("MirrorNoPartner", "Mirror Morph: the points under the brush have no partner across the mesh's symmetry plane (X = 0), so nothing was mirrored onto them."));
 	}
+}
+
+void FNearestPointFinder::Reset()
+{
+	Points.Reset();
+	Axes.Reset();
+}
+
+void FNearestPointFinder::Build(const TArray<FVector3d>& InPlaces, const TArray<int32>& InNumbers)
+{
+	Reset();
+	const int32 Count = FMath::Min(InPlaces.Num(), InNumbers.Num());
+	Points.Reserve(Count);
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		const FVector3d& Place = InPlaces[Index];
+		// A place that is not a number has no distance to anything, and would not let the ordering below end.
+		if (FMath::IsFinite(Place.X) && FMath::IsFinite(Place.Y) && FMath::IsFinite(Place.Z))
+		{
+			Points.Add({ Place, InNumbers[Index] });
+		}
+	}
+	Axes.SetNumZeroed(Points.Num());
+	Order(0, Points.Num());
+}
+
+void FNearestPointFinder::Order(int32 Low, int32 High)
+{
+	if (High - Low <= Private::NearestLeafSize)
+	{
+		return;
+	}
+
+	// The range is split along the axis it reaches furthest along.
+	FVector3d Least = Points[Low].Place;
+	FVector3d Most = Least;
+	for (int32 Index = Low + 1; Index < High; ++Index)
+	{
+		Least = Least.ComponentMin(Points[Index].Place);
+		Most = Most.ComponentMax(Points[Index].Place);
+	}
+	const FVector3d Extent = Most - Least;
+	const int32 Axis = Extent.X >= Extent.Y ? (Extent.X >= Extent.Z ? 0 : 2) : (Extent.Y >= Extent.Z ? 1 : 2);
+
+	// The point that belongs in the middle is brought there: the range is parted about one of its own points until the
+	// middle lies among the points that are as far along the axis as that one.
+	const int32 Middle = Low + (High - Low) / 2;
+	int32 From = Low;
+	int32 To = High;
+	while (To - From > 1)
+	{
+		const double First = Points[From].Place[Axis];
+		const double Second = Points[From + (To - From) / 2].Place[Axis];
+		const double Third = Points[To - 1].Place[Axis];
+		// The middle one of three of the range's points, so that at least one point is as far along as it.
+		const double Pivot = FMath::Max(FMath::Min(First, Second), FMath::Min(FMath::Max(First, Second), Third));
+		const int32 FirstEqual = From + Algo::Partition(&Points[From], To - From, [Axis, Pivot](const FPoint& Point) { return Point.Place[Axis] < Pivot; });
+		const int32 FirstFurther = FirstEqual + Algo::Partition(&Points[FirstEqual], To - FirstEqual, [Axis, Pivot](const FPoint& Point) { return Point.Place[Axis] == Pivot; });
+		if (Middle < FirstEqual)
+		{
+			To = FirstEqual;
+		}
+		else if (Middle >= FirstFurther)
+		{
+			From = FirstFurther;
+		}
+		else
+		{
+			break;
+		}
+	}
+	Axes[Middle] = static_cast<uint8>(Axis);
+	Order(Low, Middle);
+	Order(Middle + 1, High);
+}
+
+void FNearestPointFinder::Search(int32 Low, int32 High, const FVector3d& Place, double& BestSquared, int32& Best) const
+{
+	auto Consider = [&](int32 Index)
+	{
+		const double Squared = UE::Geometry::DistanceSquared(Points[Index].Place, Place);
+		if (Squared < BestSquared || (Squared == BestSquared && (Best == INDEX_NONE || Points[Index].Number < Points[Best].Number)))
+		{
+			BestSquared = Squared;
+			Best = Index;
+		}
+	};
+
+	if (High - Low <= Private::NearestLeafSize)
+	{
+		for (int32 Index = Low; Index < High; ++Index)
+		{
+			Consider(Index);
+		}
+		return;
+	}
+
+	const int32 Middle = Low + (High - Low) / 2;
+	Consider(Middle);
+	// The half the place lies in is searched first. The other half holds nothing nearer than the place is to the split,
+	// so it is searched only while that is no further than the best found; as far counts, for a point there may be
+	// equally near and have a lower number.
+	const double Across = Place[Axes[Middle]] - Points[Middle].Place[Axes[Middle]];
+	if (Across < 0.0)
+	{
+		Search(Low, Middle, Place, BestSquared, Best);
+		if (Across * Across <= BestSquared)
+		{
+			Search(Middle + 1, High, Place, BestSquared, Best);
+		}
+	}
+	else
+	{
+		Search(Middle + 1, High, Place, BestSquared, Best);
+		if (Across * Across <= BestSquared)
+		{
+			Search(Low, Middle, Place, BestSquared, Best);
+		}
+	}
+}
+
+int32 FNearestPointFinder::FindNearest(const FVector3d& Place, FVector3d* OutPlace) const
+{
+	double BestSquared = TNumericLimits<double>::Max();
+	int32 Best = INDEX_NONE;
+	Search(0, Points.Num(), Place, BestSquared, Best);
+	if (Best == INDEX_NONE)
+	{
+		return INDEX_NONE;
+	}
+	if (OutPlace)
+	{
+		*OutPlace = Points[Best].Place;
+	}
+	return Points[Best].Number;
+}
+
+FVector3d FAsymmetryMorphBrushOp::SourcePlace(const FVector3d& Place, const FVector3d& Offset, bool& bOutOnPositiveSide)
+{
+	// The +X side sits at the mirror image of the -X side plus Offset. So the sides meet half way between a point and
+	// its source, where X is half the Offset's, and each side is taken back to the other by the opposite step.
+	bOutOnPositiveSide = Place.X >= 0.5 * Offset.X;
+	return bOutOnPositiveSide
+		? FVector3d(-(Place.X - Offset.X), Place.Y - Offset.Y, Place.Z - Offset.Z)
+		: FVector3d(-Place.X + Offset.X, Place.Y + Offset.Y, Place.Z + Offset.Z);
+}
+
+void FAsymmetryMorphBrushOp::BeginStroke(const FDynamicMesh3* Mesh, const FSculptBrushStamp& Stamp, const TArray<int32>& InitialVertices)
+{
+	FMorphBrushOp::BeginStroke(Mesh, Stamp, InitialVertices);
+	Sources.Reset();
+	Mirrored.Reset();
+	bCanAct = false;
+	if (!IsEditable())
+	{
+		return;
+	}
+
+	// The settings hold for the whole stroke: a point's source is looked for once.
+	const USculptBrushPackAsymmetryMorphOpProps* Props = GetPropertySetAs<USculptBrushPackAsymmetryMorphOpProps>();
+	Offset = FVector3d(Props->Offset);
+	CopyFrom = Props->CopyFrom;
+
+	// With its Symmetry on, the tool sets the -X side from the +X side after every stamp, whatever a brush did there.
+	if (Context->IsToolSymmetryOn())
+	{
+		Context->ReportProblem(LOCTEXT("AsymmetryWithSymmetry", "Asymmetry Morph does nothing while the tool's Symmetry is on: Symmetry sets the -X side from the +X side under every brush. Turn Symmetry off to use this brush."));
+		return;
+	}
+
+	// The whole mesh's points as they stand now. The deltas are those of this stroke's beginning; the places do not
+	// change while the tool runs, so the tree over them is built anew only when they do.
+	const int32 Count = Context->GetReferencePointCount();
+	TArray<FVector3d> NewPlaces;
+	TArray<bool> bNewInUse;
+	NewPlaces.SetNumZeroed(Count);
+	bNewInUse.SetNumZeroed(Count);
+	Deltas.SetNumZeroed(Count, EAllowShrinking::No);
+	int32 InUse = 0;
+	for (int32 Point = 0; Point < Count; ++Point)
+	{
+		FVector3d Place;
+		FVector3d Delta;
+		if (Context->GetReferencePoint(Point, Place, Delta))
+		{
+			NewPlaces[Point] = Place;
+			Deltas[Point] = Delta;
+			bNewInUse[Point] = true;
+			++InUse;
+		}
+	}
+	if (InUse == 0)
+	{
+		Context->ReportProblem(LOCTEXT("AsymmetryNoPoints", "Asymmetry Morph could not read the mesh's points in its reference pose, and moved nothing."));
+		return;
+	}
+	if (Finder.Num() == 0 || NewPlaces != Places || bNewInUse != bInUse)
+	{
+		Places = MoveTemp(NewPlaces);
+		bInUse = MoveTemp(bNewInUse);
+		TArray<FVector3d> TreePlaces;
+		TArray<int32> TreeNumbers;
+		TreePlaces.Reserve(InUse);
+		TreeNumbers.Reserve(InUse);
+		for (int32 Point = 0; Point < Count; ++Point)
+		{
+			if (bInUse[Point])
+			{
+				TreePlaces.Add(Places[Point]);
+				TreeNumbers.Add(Point);
+			}
+		}
+		Finder.Build(TreePlaces, TreeNumbers);
+	}
+	bCanAct = Finder.Num() > 0;
+}
+
+void FAsymmetryMorphBrushOp::PrepareStamp(const FSculptBrushStamp& Stamp, const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices)
+{
+	if (!bCanAct)
+	{
+		return;
+	}
+	if (Sources.Num() < Mesh.MaxVertexID())
+	{
+		Sources.SetNumZeroed(Mesh.MaxVertexID());
+		Mirrored.SetNumUninitialized(Mesh.MaxVertexID());
+	}
+
+	// The stamp's points whose source has not been looked for: where each stands in the whole mesh, and where its source
+	// is looked for. A point on the side that is copied from keeps its shape.
+	struct FSought
+	{
+		int32 Vertex;
+		int32 Point;
+		FVector3d Place;
+	};
+	TArray<FSought> Sought;
+	for (const int32 Vertex : Vertices)
+	{
+		if (Sources[Vertex] != ESource::Unknown)
+		{
+			continue;
+		}
+		const int32 Point = Context->GetReferencePointOf(Vertex);
+		if (!bInUse.IsValidIndex(Point) || !bInUse[Point])
+		{
+			Sources[Vertex] = ESource::Keeps;
+			continue;
+		}
+		bool bOnPositiveSide = false;
+		const FVector3d Place = SourcePlace(Places[Point], Offset, bOnPositiveSide);
+		const bool bIsCopiedFrom = (bOnPositiveSide && CopyFrom == ESculptBrushPackMirrorSource::PositiveX)
+			|| (!bOnPositiveSide && CopyFrom == ESculptBrushPackMirrorSource::NegativeX);
+		if (bIsCopiedFrom)
+		{
+			Sources[Vertex] = ESource::Keeps;
+			continue;
+		}
+		Sought.Add({ Vertex, Point, Place });
+	}
+
+	// Each has a vertex of its own, so each writes entries of its own.
+	ParallelFor(Sought.Num(), [&](int32 Index)
+	{
+		const FSought& One = Sought[Index];
+		FVector3d FoundAt;
+		const int32 Source = Finder.FindNearest(One.Place, &FoundAt);
+		if (Source == INDEX_NONE)
+		{
+			Sources[One.Vertex] = ESource::Keeps;
+			return;
+		}
+		// A point whose source stands where it stands itself is its own mirror image, and so are the points that share
+		// its place: it keeps what lies in the plane of its own delta.
+		const bool bIsItsOwn = FoundAt == Places[One.Point];
+		const FVector3d& Delta = Deltas[bIsItsOwn ? One.Point : Source];
+		Mirrored[One.Vertex] = FVector3d(bIsItsOwn ? 0.0 : -Delta.X, Delta.Y, Delta.Z);
+		Sources[One.Vertex] = ESource::Found;
+	});
+}
+
+FVector3d FAsymmetryMorphBrushOp::FullTarget(const FSculptBrushStamp& Stamp, int32 Vertex, const FVector3d& Before, const FVector3d& Base) const
+{
+	FVector3d Shown;
+	if (!bCanAct || !Sources.IsValidIndex(Vertex) || Sources[Vertex] != ESource::Found || !Context->GetOffsetOfDelta(Vertex, Mirrored[Vertex], Shown))
+	{
+		return Before;
+	}
+	return Base + Shown;
 }
 
 void FMushMorphBrushOp::BeginStroke(const FDynamicMesh3* Mesh, const FSculptBrushStamp& Stamp, const TArray<int32>& InitialVertices)
@@ -957,6 +1251,13 @@ TArray<FName> USculptBrushPackCloneMorphOpProps::GetSourceOptions() const
 }
 
 USculptBrushPackMirrorMorphOpProps::USculptBrushPackMirrorMorphOpProps()
+{
+	// As for Clone Morph.
+	Strength = 1.0f;
+	Falloff = 0.5f;
+}
+
+USculptBrushPackAsymmetryMorphOpProps::USculptBrushPackAsymmetryMorphOpProps()
 {
 	// As for Clone Morph.
 	Strength = 1.0f;

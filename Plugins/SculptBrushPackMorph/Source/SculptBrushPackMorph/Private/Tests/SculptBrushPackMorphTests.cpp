@@ -24,6 +24,7 @@
 #include "Framework/Commands/UICommandList.h"
 #include "HAL/IConsoleManager.h"
 #include "InteractiveToolManager.h"
+#include "Math/RandomStream.h"
 #include "MeshDescription.h"
 #include "MeshVertexSculptTool.h"
 #include "ReferenceSkeleton.h"
@@ -42,6 +43,7 @@
 #include "VectorUtil.h"
 
 #include <initializer_list>
+#include <limits>
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -69,6 +71,13 @@ namespace SculptBrushPackMorphTestLocals
 		TArray<FVector3d> UnposedWithout;
 		/** Places in the mesh's UV channel 0, by vertex. Empty: the mesh has no UVs. */
 		TArray<FVector2d> UVs;
+		/** The whole mesh's points in the reference pose, by point number, and the edited morph's deltas there. Empty: not known. */
+		TArray<FVector3d> ReferencePlaces;
+		TArray<FVector3d> ReferenceDeltas;
+		/** The point number of each vertex of the sculpt mesh. Empty: a vertex's own number. */
+		TArray<int32> PointOfVertex;
+		/** What the shown mesh makes of a delta kept for the reference pose: this many times it. */
+		double ShownScale = 1.0;
 		/** The warning that stands for the user, empty when none does. */
 		FText Problem;
 
@@ -123,6 +132,30 @@ namespace SculptBrushPackMorphTestLocals
 				return false;
 			}
 			OutUV = UVs[Vertex];
+			return true;
+		}
+		virtual int32 GetReferencePointCount() const override { return ReferencePlaces.Num(); }
+		virtual bool GetReferencePoint(int32 Point, FVector3d& OutPlace, FVector3d& OutDelta) const override
+		{
+			if (!ReferencePlaces.IsValidIndex(Point) || !ReferenceDeltas.IsValidIndex(Point))
+			{
+				return false;
+			}
+			OutPlace = ReferencePlaces[Point];
+			OutDelta = ReferenceDeltas[Point];
+			return true;
+		}
+		virtual int32 GetReferencePointOf(int32 Vertex) const override
+		{
+			if (PointOfVertex.IsEmpty())
+			{
+				return ReferencePlaces.IsValidIndex(Vertex) ? Vertex : INDEX_NONE;
+			}
+			return PointOfVertex.IsValidIndex(Vertex) ? PointOfVertex[Vertex] : INDEX_NONE;
+		}
+		virtual bool GetOffsetOfDelta(int32 Vertex, const FVector3d& Delta, FVector3d& OutOffset) const override
+		{
+			OutOffset = Delta * ShownScale;
 			return true;
 		}
 	};
@@ -532,6 +565,214 @@ bool FSculptBrushPackMorphMirrorTest::RunTest(const FString& Parameters)
 	Mirror.BeginStroke(&Shown, Stamp, {});
 	TestPoint(this, TEXT("Without partners nothing moves"), Apply(Mirror, Shown, Stamp)[1], FVector3d(-2, 0, 0));
 	TestTrue(TEXT("and the user is told that the points have no partner"), Context->Problem.ToString().Contains(TEXT("no partner")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSculptBrushPackMorphNearestPointTest, "SculptBrushPackMorph.Brushes.NearestPoint",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FSculptBrushPackMorphNearestPointTest::RunTest(const FString& Parameters)
+{
+	using namespace SculptBrushPackMorph;
+
+	FNearestPointFinder Finder;
+	TestEqual(TEXT("A finder without points finds none"), Finder.FindNearest(FVector3d::Zero()), static_cast<int32>(INDEX_NONE));
+
+	// 600 points on a lattice of halves, so that several share a place and many lie equally far from a place asked for;
+	// they are numbered in another order than they are given in. One more has a place that is not a number.
+	FRandomStream Random(20261112);
+	const int32 Count = 600;
+	TArray<FVector3d> Places;
+	TArray<int32> Numbers;
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		Places.Add(FVector3d(Random.RandRange(-8, 8) * 0.5, Random.RandRange(-8, 8) * 0.5, Random.RandRange(-2, 2) * 0.5));
+		Numbers.Add((Index * 7) % Count);
+	}
+	TArray<FVector3d> Given = Places;
+	TArray<int32> GivenNumbers = Numbers;
+	Given.Add(FVector3d(std::numeric_limits<double>::quiet_NaN(), 0.0, 0.0));
+	GivenNumbers.Add(Count);
+	Finder.Build(Given, GivenNumbers);
+	TestEqual(TEXT("The point whose place is not a number is left out"), Finder.Num(), Count);
+
+	// 2000 places on a lattice of quarters that reaches well past the points, and one far off. For each, every point is
+	// looked at in turn, and the finder has to give the same one: the nearest, and the lowest numbered of several.
+	const int32 Queries = 2001;
+	int32 Agree = 0;
+	int32 WithSeveralNearest = 0;
+	for (int32 Query = 0; Query < Queries; ++Query)
+	{
+		const FVector3d Place = Query == 0 ? FVector3d(1000.0, -1000.0, 500.0)
+			: FVector3d(Random.RandRange(-24, 24) * 0.25, Random.RandRange(-24, 24) * 0.25, Random.RandRange(-8, 8) * 0.25);
+		int32 Expected = INDEX_NONE;
+		double ExpectedSquared = TNumericLimits<double>::Max();
+		int32 AsNear = 0;
+		for (int32 Index = 0; Index < Count; ++Index)
+		{
+			const double Squared = UE::Geometry::DistanceSquared(Places[Index], Place);
+			AsNear = Squared < ExpectedSquared ? 1 : (Squared == ExpectedSquared ? AsNear + 1 : AsNear);
+			if (Squared < ExpectedSquared || (Squared == ExpectedSquared && Numbers[Index] < Numbers[Expected]))
+			{
+				ExpectedSquared = Squared;
+				Expected = Index;
+			}
+		}
+		WithSeveralNearest += AsNear > 1 ? 1 : 0;
+		FVector3d FoundAt;
+		const int32 Found = Finder.FindNearest(Place, &FoundAt);
+		Agree += Found == Numbers[Expected] && FoundAt == Places[Expected] ? 1 : 0;
+	}
+	AddInfo(FString::Printf(TEXT("%d places asked for; at %d of them several points were equally near."), Queries, WithSeveralNearest));
+	TestEqual(TEXT("For every place the finder gives the nearest point, the lowest numbered of several"), Agree, Queries);
+	TestTrue(TEXT("Places with several nearest points were among them"), WithSeveralNearest > 0);
+
+	Finder.Reset();
+	TestEqual(TEXT("Emptied, it finds none again"), Finder.FindNearest(FVector3d::Zero()), static_cast<int32>(INDEX_NONE));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSculptBrushPackMorphAsymmetryTest, "SculptBrushPackMorph.Brushes.AsymmetryMorph",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FSculptBrushPackMorphAsymmetryTest::RunTest(const FString& Parameters)
+{
+	using namespace SculptBrushPackMorphTestLocals;
+
+	// Where a point's source is looked for. The +X side sits at the -X side's mirror image plus the Offset, so a -X
+	// point goes to its mirror place plus the Offset and a +X point to the mirror place of itself less the Offset: there
+	// and back again. With an X in the Offset the sides meet at half of it.
+	bool bOnPositiveSide = true;
+	TestPoint(this, TEXT("A -X point's source: its mirror place plus the Offset"), FAsymmetryMorphBrushOp::SourcePlace(FVector3d(-4, 0, 0), FVector3d(0, 3, 0), bOnPositiveSide), FVector3d(4, 3, 0));
+	TestFalse(TEXT("and it is on the -X side"), bOnPositiveSide);
+	TestPoint(this, TEXT("Back from there: the mirror place of the +X point less the Offset"), FAsymmetryMorphBrushOp::SourcePlace(FVector3d(4, 3, 0), FVector3d(0, 3, 0), bOnPositiveSide), FVector3d(-4, 0, 0));
+	TestTrue(TEXT("and that one is on the +X side"), bOnPositiveSide);
+	TestPoint(this, TEXT("With an Offset of 3 along X, a point at X = 1 is on the -X side and goes to X = 2"), FAsymmetryMorphBrushOp::SourcePlace(FVector3d(1, 0, 0), FVector3d(3, 0, 0), bOnPositiveSide), FVector3d(2, 0, 0));
+	TestFalse(TEXT("as the sides meet at X = 1.5"), bOnPositiveSide);
+	TestPoint(this, TEXT("and back from X = 2 to X = 1"), FAsymmetryMorphBrushOp::SourcePlace(FVector3d(2, 0, 0), FVector3d(3, 0, 0), bOnPositiveSide), FVector3d(1, 0, 0));
+	TestTrue(TEXT("from the +X side"), bOnPositiveSide);
+
+	// Six points of a mesh whose sides do not match, in its reference pose, and the edited morph's delta at each:
+	//   0 (-4, 0, 0) none        1 (4, 0, 0) (1, 2, 3)     2 (4, 3, 0) (0, 0, 5)
+	//   3 (5, 3, 1) (2, 0, 0)    4 (0, 0, 0) (1, 1, 0)     5 (-4, -3, 0) (0, 7, 0)
+	// The mesh is shown as it stands, with the morph at full weight, so a delta is shown as it is kept.
+	const TArray<FVector3d> Places = { FVector3d(-4, 0, 0), FVector3d(4, 0, 0), FVector3d(4, 3, 0), FVector3d(5, 3, 1), FVector3d(0, 0, 0), FVector3d(-4, -3, 0) };
+	const TArray<FVector3d> Deltas = { FVector3d(0, 0, 0), FVector3d(1, 2, 3), FVector3d(0, 0, 5), FVector3d(2, 0, 0), FVector3d(1, 1, 0), FVector3d(0, 7, 0) };
+	const TSharedRef<FTestContext> Context = MakeShared<FTestContext>();
+	Context->ReferencePlaces = Places;
+	Context->ReferenceDeltas = Deltas;
+	FDynamicMesh3 Shown;
+	for (int32 Point = 0; Point < Places.Num(); ++Point)
+	{
+		Context->Without.AppendVertex(Places[Point]);
+		Shown.AppendVertex(Places[Point] + Deltas[Point]);
+	}
+
+	FAsymmetryMorphBrushOp Asymmetry(Context);
+	USculptBrushPackAsymmetryMorphOpProps* Settings = Prepare<FAsymmetryMorphBrushOp, USculptBrushPackAsymmetryMorphOpProps>(Asymmetry);
+	TestEqual(TEXT("Asymmetry Morph's Strength is 1"), Settings->Strength, 1.0f, 0.0f);
+	TestEqual(TEXT("Its Falloff is the engine's Move brush's 0.5"), Settings->Falloff, 0.5f, 0.0f);
+	TestTrue(TEXT("Its Offset is none"), Settings->Offset == FVector::ZeroVector);
+	TestTrue(TEXT("It copies from the other side of each brushed point"), Settings->CopyFrom == ESculptBrushPackMirrorSource::OtherSide);
+
+	// One stroke of one stamp over every point, at full reach.
+	const FSculptBrushStamp Stamp = MakeStamp(FVector3d::Zero());
+	auto Stroke = [&](const FDynamicMesh3& Mesh, const FSculptBrushStamp& With)
+	{
+		Asymmetry.BeginStroke(&Mesh, With, {});
+		TArray<FVector3d> Result = Apply(Asymmetry, Mesh, With);
+		Asymmetry.EndStroke(&Mesh, With, {});
+		return Result;
+	};
+
+	// Without an Offset the brush looks straight across X = 0 and takes the nearest point there. Point 0 finds point 1
+	// at its mirror place. Point 5's mirror place (4, -3, 0) holds no point: point 1 is 3 from it and nearest. Points 2
+	// and 3 find point 0, 3 and the square root of 11 from their mirror places, which has no shape. Point 4 is its own
+	// mirror image and keeps what lies in the plane of its delta.
+	TArray<FVector3d> Moved = Stroke(Shown, Stamp);
+	TestPoint(this, TEXT("No Offset: point 0 takes point 1's delta, mirrored"), Moved[0], FVector3d(-5, 2, 3));
+	TestPoint(this, TEXT("No Offset: point 1 takes point 0's, which is none"), Moved[1], FVector3d(4, 0, 0));
+	TestPoint(this, TEXT("No Offset: point 2 takes the nearest point's across from it, point 0's"), Moved[2], FVector3d(4, 3, 0));
+	TestPoint(this, TEXT("No Offset: point 3 takes point 0's too"), Moved[3], FVector3d(5, 3, 1));
+	TestPoint(this, TEXT("No Offset: point 4, on the plane, keeps what lies in the plane"), Moved[4], FVector3d(0, 1, 0));
+	TestPoint(this, TEXT("No Offset: point 5 takes the nearest point's across from it, point 1's"), Moved[5], FVector3d(-5, -1, 3));
+
+	// The +X side sits 3 along Y from the mirror image. Point 0 now finds point 2, and point 5 finds point 1 at its
+	// place; and the other way round point 1 finds point 5 and point 2 finds point 0.
+	Settings->Offset = FVector(0, 3, 0);
+	Moved = Stroke(Shown, Stamp);
+	TestPoint(this, TEXT("Offset 3 along Y: point 0 takes point 2's delta"), Moved[0], FVector3d(-4, 0, 5));
+	TestPoint(this, TEXT("Offset 3 along Y: point 5 takes point 1's, mirrored"), Moved[5], FVector3d(-5, -1, 3));
+	TestPoint(this, TEXT("Offset 3 along Y: point 1 takes point 5's"), Moved[1], FVector3d(4, 7, 0));
+	TestPoint(this, TEXT("Offset 3 along Y: point 2 takes point 0's, which is none"), Moved[2], FVector3d(4, 3, 0));
+	TestPoint(this, TEXT("Offset 3 along Y: point 4 is still nearest to its own source place, and keeps what lies in the plane"), Moved[4], FVector3d(0, 1, 0));
+
+	// The nearest point: with the Offset at (0.5, 3, 0.5) point 0's source is looked for at (4.5, 3, 0.5), as far from
+	// point 2 as from point 3 (a half, squared), and the lower number is taken. A quarter further along X it is nearer
+	// to point 3 (0.3125 against 0.8125, squared).
+	Settings->Offset = FVector(0.5, 3, 0.5);
+	TestPoint(this, TEXT("Equally near to points 2 and 3: point 2's delta is taken"), Stroke(Shown, Stamp)[0], FVector3d(-4, 0, 5));
+	Settings->Offset = FVector(0.75, 3, 0.5);
+	TestPoint(this, TEXT("Nearer to point 3: its delta is taken, mirrored"), Stroke(Shown, Stamp)[0], FVector3d(-6, 0, 0));
+
+	// Copy From: with +X Side only the -X points change, with -X Side only the +X points.
+	Settings->Offset = FVector(0, 3, 0);
+	Settings->CopyFrom = ESculptBrushPackMirrorSource::PositiveX;
+	Moved = Stroke(Shown, Stamp);
+	TestPoint(this, TEXT("Copy From +X Side: a -X point takes its source's shape"), Moved[0], FVector3d(-4, 0, 5));
+	TestPoint(this, TEXT("Copy From +X Side: a +X point keeps its own"), Moved[1], FVector3d(5, 2, 3));
+	Settings->CopyFrom = ESculptBrushPackMirrorSource::NegativeX;
+	Moved = Stroke(Shown, Stamp);
+	TestPoint(this, TEXT("Copy From -X Side: a -X point keeps its own"), Moved[0], FVector3d(-4, 0, 0));
+	TestPoint(this, TEXT("Copy From -X Side: a +X point takes its source's shape"), Moved[1], FVector3d(4, 7, 0));
+
+	// Which side a point is on goes by where the sides meet. Without an Offset point 4, at X = 0, is on the +X side.
+	// With an Offset of 3 along X the sides meet at X = 1.5 and it is on the -X side: its source is looked for at
+	// (3, 0, 0), nearest to point 1.
+	Settings->CopyFrom = ESculptBrushPackMirrorSource::PositiveX;
+	Settings->Offset = FVector::ZeroVector;
+	TestPoint(this, TEXT("Copy From +X Side, no Offset: the point at X = 0 is on the +X side and keeps its shape"), Stroke(Shown, Stamp)[4], FVector3d(1, 1, 0));
+	Settings->Offset = FVector(3, 0, 0);
+	Moved = Stroke(Shown, Stamp);
+	TestPoint(this, TEXT("Copy From +X Side, Offset 3 along X: the point at X = 0 is on the -X side and takes point 1's shape"), Moved[4], FVector3d(-1, 2, 3));
+	TestPoint(this, TEXT("and point 1 keeps its own"), Moved[1], FVector3d(5, 2, 3));
+	Settings->CopyFrom = ESculptBrushPackMirrorSource::OtherSide;
+	Settings->Offset = FVector::ZeroVector;
+
+	// The stroke's rule is the morph brushes' own: at half power a point stands half way.
+	FSculptBrushStamp Half = Stamp;
+	Half.Power = 0.5;
+	TestPoint(this, TEXT("At half power point 0 stands half way to its source's shape"), Stroke(Shown, Half)[0], FVector3d(-4.5, 1, 1.5));
+
+	// What the shown mesh makes of a delta is the context's to say: where it shows a delta twice as large, the point
+	// stands twice as far from its place without the morph.
+	Context->ShownScale = 2.0;
+	TestPoint(this, TEXT("A delta that is shown twice as large moves the point twice as far"), Stroke(Shown, Stamp)[0], FVector3d(-6, 4, 6));
+	Context->ShownScale = 1.0;
+
+	// With the tool's Symmetry on the brush stands back and says so; a stroke that can act takes the report back.
+	Context->bSymmetryOn = true;
+	TestPoint(this, TEXT("With the tool's Symmetry on nothing moves"), Stroke(Shown, Stamp)[0], FVector3d(-4, 0, 0));
+	TestTrue(TEXT("and the brush says why"), Context->Problem.ToString().Contains(TEXT("Symmetry is on")));
+	Context->bSymmetryOn = false;
+	TestPoint(this, TEXT("With Symmetry off again it acts"), Stroke(Shown, Stamp)[0], FVector3d(-5, 2, 3));
+	TestTrue(TEXT("and the report is taken back"), Context->Problem.IsEmpty());
+
+	// Where nothing is known of the mesh's points in its reference pose, nothing moves, and the brush says so.
+	Context->ReferencePlaces.Reset();
+	TestPoint(this, TEXT("Without the mesh's points nothing moves"), Stroke(Shown, Stamp)[0], FVector3d(-4, 0, 0));
+	TestTrue(TEXT("and the brush says so"), Context->Problem.ToString().Contains(TEXT("reference pose")));
+	Context->ReferencePlaces = Places;
+
+	// Part of the mesh isolated: the sculpt mesh has two vertices, which are the whole mesh's points 5 and 0. Their
+	// sources are found among the whole mesh's points, none of which is in the sculpt mesh.
+	Context->PointOfVertex = { 5, 0 };
+	Context->Without = MakePoints({ Places[5], Places[0] });
+	const FDynamicMesh3 Part = MakePoints({ Places[5] + Deltas[5], Places[0] + Deltas[0] });
+	Settings->Offset = FVector(0, 3, 0);
+	Moved = Stroke(Part, Stamp);
+	TestPoint(this, TEXT("Isolated: the vertex that is point 5 takes point 1's delta, mirrored"), Moved[0], FVector3d(-5, -1, 3));
+	TestPoint(this, TEXT("Isolated: the vertex that is point 0 takes point 2's delta"), Moved[1], FVector3d(-4, 0, 5));
 	return true;
 }
 
@@ -1589,11 +1830,11 @@ bool FSculptBrushPackMorphEditorTest::RunTest(const FString& Parameters)
 {
 	using namespace SculptBrushPackMorphTestLocals;
 
-	// As the plugin is set: all six morph brushes are in the palette.
+	// As the plugin is set: all seven morph brushes are in the palette.
 	FScopedCloneAndMirror CloneAndMirror(true);
 	TestTrue(TEXT("The plugin has its console variable for Clone Morph and Mirror Morph"), CloneAndMirror.IsFound());
 	TestTrue(TEXT("The variable is on unless switched off"), CloneAndMirror.IsOnByDefault());
-	TestTrue(TEXT("With it on the morph brushes are six"), GetBrushIdentifiers() == TArray<int32>({ BrushID::AmplifyMorph, BrushID::SmoothMorph, BrushID::MushMorph, BrushID::NuWrinkle, BrushID::CloneMorph, BrushID::MirrorMorph }));
+	TestTrue(TEXT("With it on the morph brushes are seven"), GetBrushIdentifiers() == TArray<int32>({ BrushID::AmplifyMorph, BrushID::SmoothMorph, BrushID::MushMorph, BrushID::NuWrinkle, BrushID::CloneMorph, BrushID::MirrorMorph, BrushID::AsymmetryMorph }));
 
 	// PackLift moves every point 1 up.
 	FMorphToolSession Session;
@@ -1684,22 +1925,50 @@ bool FSculptBrushPackMorphEditorTest::RunTest(const FString& Parameters)
 				TestEqual(TEXT("With the pose taken off, the edited morph adds its delta of 1 up to every point"), LiftedByOne, Vertices.Num());
 				AddInfo(FString::Printf(TEXT("The unposed place without the morph differs from the shown one by at most %.3g."), LargestUnposed));
 				AddInfo(FString::Printf(TEXT("%d points; the other morph's offset differs from (2, 0, 0) by at most %.3g."), Vertices.Num(), LargestSource));
+
+				// What Asymmetry Morph reads: the whole mesh's points in the reference pose with the edited morph's deltas
+				// there, which of them each vertex is, and what the shown mesh makes of a delta. PackLift's delta is 1
+				// up at every point, as it is kept. The cube stands in its reference pose with the morph at full weight,
+				// so a point's reference place is its shown place without the morph, and a delta is shown as it is kept,
+				// both up to the rounding of the engine's skinning; the largest differences are reported, not judged.
+				int32 WithPoint = 0;
+				int32 KeptAsOneUp = 0;
+				double LargestPlace = 0.0;
+				double LargestShown = 0.0;
+				for (const int32 Vertex : Vertices)
+				{
+					const int32 Point = Context->GetReferencePointOf(Vertex);
+					FVector3d Place, Delta, ShownDelta;
+					if (Point >= 0 && Point < Context->GetReferencePointCount() && Context->GetReferencePoint(Point, Place, Delta) && Context->GetOffsetOfDelta(Vertex, Delta, ShownDelta))
+					{
+						++WithPoint;
+						KeptAsOneUp += Delta == FVector3d(0, 0, 1) ? 1 : 0;
+						LargestPlace = FMath::Max(LargestPlace, (Place - Without->GetVertex(Vertex)).GetAbsMax());
+						LargestShown = FMath::Max(LargestShown, (ShownDelta - Delta).GetAbsMax());
+					}
+				}
+				TestEqual(TEXT("Every point is one of the whole mesh's points in its reference pose"), WithPoint, Vertices.Num());
+				TestEqual(TEXT("and the edited morph's delta there is 1 up, as it is kept"), KeptAsOneUp, Vertices.Num());
+				FVector3d NoPlace, NoDelta;
+				TestFalse(TEXT("A number past the mesh's points is no point"), Context->GetReferencePoint(Context->GetReferencePointCount(), NoPlace, NoDelta));
+				AddInfo(FString::Printf(TEXT("%d reference points; a reference place differs from the shown place without the morph by at most %.3g, and a delta as shown from the delta as kept by at most %.3g."),
+					Context->GetReferencePointCount(), LargestPlace, LargestShown));
 			}
 			Context->EndStroke();
 		}
 
 		// A tool left on Mirror Morph, and the variable switched off: the next tool does not have that brush. It starts
 		// on the engine's Move; asked for a brush it lacks it would fail an engine ensure, which this test would report
-		// as an error. Its palette holds the four other morph brushes.
+		// as an error. Its palette holds the five other morph brushes.
 		Session.Tool->SetActiveBrushType(BrushID::MirrorMorph);
 		CloneAndMirror.Set(false);
-		TestTrue(TEXT("With the variable off the morph brushes are Amplify, Smooth, Mush and Nu Wrinkle"), GetBrushIdentifiers() == TArray<int32>({ BrushID::AmplifyMorph, BrushID::SmoothMorph, BrushID::MushMorph, BrushID::NuWrinkle }));
+		TestTrue(TEXT("With the variable off the morph brushes are Amplify, Smooth, Mush, Nu Wrinkle and Asymmetry"), GetBrushIdentifiers() == TArray<int32>({ BrushID::AmplifyMorph, BrushID::SmoothMorph, BrushID::MushMorph, BrushID::NuWrinkle, BrushID::AsymmetryMorph }));
 		if (RestartTool(*this, Session))
 		{
 			TestEqual(TEXT("A tool that starts without Mirror Morph, after one left on it, starts on the engine's Move"), Session.Tool->SculptProperties->PrimaryBrushID, static_cast<int32>(EMeshVertexSculptBrushType::Move));
 			CheckPalette(*this, *Session.Tool, /*bExpectCloneAndMirror*/ false);
 
-			// Switched on again, the next tool has all six.
+			// Switched on again, the next tool has all seven.
 			CloneAndMirror.Set(true);
 			if (RestartTool(*this, Session))
 			{
@@ -1763,7 +2032,7 @@ bool FSculptBrushPackMorphStrokesTest::RunTest(const FString& Parameters)
 	using namespace SculptBrushPackMorphTestLocals;
 	using SculptBrushPackMorph::Private::FMorphToolAccess;
 
-	// The test strokes with all six brushes, so Clone Morph and Mirror Morph are kept in the palette whatever the console
+	// The test strokes with every morph brush, so Clone Morph and Mirror Morph are kept in the palette whatever the console
 	// variable was.
 	FScopedCloneAndMirror CloneAndMirror(true);
 
@@ -1916,6 +2185,28 @@ bool FSculptBrushPackMorphStrokesTest::RunTest(const FString& Parameters)
 			TestTrue(TEXT("Amplify Morph: the stroke met the mesh"), Brush(BrushID::AmplifyMorph, RightFront));
 			AddInfo(TEXT("After Amplify Morph on a +X corner:") + Describe(RightFront));
 			TestTrue(TEXT("Amplify Morph makes the brushed corner's shape half again as strong"), AllNearer(RightFront, Before, LiftAsDouble * 1.5));
+
+			// Asymmetry Morph on the -X back corner, told that the +X side sits a cube's width toward -Y of the mirror
+			// image. The corner's source is then looked for at the +X front corner, not at the +X back corner straight
+			// across, and the corner takes that one's shape, mirrored. The two +X corners differ since Amplify Morph's
+			// stroke above, which is what tells the two apart: straight across the corner would stay as it is.
+			USculptBrushPackAsymmetryMorphOpProps* AsymmetrySettings = nullptr;
+			for (UObject* Object : Tool->GetToolProperties(/*bEnabledOnly*/ false))
+			{
+				AsymmetrySettings = AsymmetrySettings ? AsymmetrySettings : Cast<USculptBrushPackAsymmetryMorphOpProps>(Object);
+			}
+			if (TestNotNull(TEXT("Asymmetry Morph's settings"), AsymmetrySettings))
+			{
+				AsymmetrySettings->Offset = FVector(0.0, Bounds.Min.Y - Bounds.Max.Y, 0.0);
+				Before = DeltasOf(LeftBack);
+				const TArray<FVector3d> SourceBefore = DeltasOf(RightFront);
+				TestTrue(TEXT("Asymmetry Morph: the stroke met the mesh"), Brush(BrushID::AsymmetryMorph, LeftBack));
+				AddInfo(TEXT("After Asymmetry Morph on the -X back corner, with the Offset a cube's width toward -Y:") + Describe(LeftBack));
+				TestTrue(TEXT("Asymmetry Morph gives the brushed corner the shape of the corner found at the offset place, mirrored"),
+					AllNearer(LeftBack, Before, FVector3d(-1.5 * LiftAsDouble.X, 1.5 * LiftAsDouble.Y, 1.5 * LiftAsDouble.Z)));
+				TestTrue(TEXT("Asymmetry Morph leaves the corner it copied from as it was"), DeltasOf(RightFront) == SourceBefore);
+				AsymmetrySettings->Offset = FVector::ZeroVector;
+			}
 
 			// Smooth Morph on the other +X corner: its points' deltas move toward their neighbors'.
 			Before = DeltasOf(RightBack);

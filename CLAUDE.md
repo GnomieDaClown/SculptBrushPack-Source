@@ -12,8 +12,8 @@ Repository: https://github.com/GnomieDaClown/SculptBrushPack-Source (public; the
   - `Plugins/SculptBrushPack` adds nineteen brushes to the engine's Vertex Sculpt tools (Modeling Mode's Vertex Sculpt, the
     Skeletal Mesh Editor's Sculpt and Sculpt Morph Target).
   - `Plugins/SculptBrushPackMorph` adds morph target brushes to Sculpt Morph Target: Amplify Morph, Smooth Morph, Mush Morph,
-    Nu Wrinkle, Clone Morph and Mirror Morph. The last two leave the palette when the console variable
-    `SculptBrushPackMorph.CloneAndMirror` is switched off. It also holds content: three wrinkle maps for Nu Wrinkle, as
+    Nu Wrinkle, Clone Morph, Mirror Morph and Asymmetry Morph. Clone Morph and Mirror Morph leave the palette when the
+    console variable `SculptBrushPackMorph.CloneAndMirror` is switched off. It also holds content: three wrinkle maps for Nu Wrinkle, as
     texture assets in `Content/WrinkleMaps` with their PNG files in `Resources/WrinkleMaps`. This plugin needs the first one and the engine's experimental plugin
     `SkeletalMeshMorphTargetEditingTools`, which its descriptor enables.
 - Written for **Unreal Engine 5.8**; built and tested on stock 5.8.4, Win64, MSVC. Nothing else has been tried.
@@ -88,10 +88,10 @@ arguments: `-EngineRoot <folder>`, `-Step Build` or `-Step Test`, `-Filter Sculp
 
 ```
 Build (BrushPackHost58Editor Win64 Development): exit 0, 0 errors, 0 warnings, ... s
-Tests (SculptBrushPack): 29 passed, 0 failed, of 29; editor exit 0; ... s
+Tests (SculptBrushPack): 31 passed, 0 failed, of 31; editor exit 0; ... s
 ```
 
-Twenty-nine tests: sixteen under `SculptBrushPack.` and thirteen under `SculptBrushPackMorph.`. Logs are in `Build/Logs`.
+Thirty-one tests: sixteen under `SculptBrushPack.` and fifteen under `SculptBrushPackMorph.`. Logs are in `Build/Logs`.
 
 **Things that are not failures.**
 
@@ -148,7 +148,7 @@ Twenty-nine tests: sixteen under `SculptBrushPack.` and thirteen under `SculptBr
   as a path relative to itself (`../../Resources/WrinkleMaps/<name>.png`) and nothing else about where it was made.
   Afterwards: sRGB off, compression Grayscale. The test `SculptBrushPackMorph.Brushes.WrinkleMapsOfThePlugin` loads
   and reads all three.
-- Identifiers of the pack's brushes are 2001 to 2019 and of the morph brushes 2101 to 2106. A brush that another module
+- Identifiers of the pack's brushes are 2001 to 2019 and of the morph brushes 2101 to 2107. A brush that another module
   hands the pack through `SculptBrushPack::AddBrushProvider` needs an identifier of 1000 or more that is not in use.
 
 ## Git, branches and releases

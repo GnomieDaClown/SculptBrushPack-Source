@@ -13,9 +13,9 @@ namespace SculptBrushPackMorph
 {
 	/**
 	 * Identifiers of the morph brushes a Sculpt Morph Target tool started now would get, in the order the brush palette
-	 * lists them, after the Sculpt Brush Pack's own: Amplify Morph, Smooth Morph, Mush Morph, Nu Wrinkle, Clone Morph
-	 * and Mirror Morph; the last two only while the console variable SculptBrushPackMorph.CloneAndMirror is on, as it is
-	 * unless switched off. Call on the game thread.
+	 * lists them, after the Sculpt Brush Pack's own: Amplify Morph, Smooth Morph, Mush Morph, Nu Wrinkle, Clone Morph,
+	 * Mirror Morph and Asymmetry Morph; Clone Morph and Mirror Morph only while the console variable
+	 * SculptBrushPackMorph.CloneAndMirror is on, as it is unless switched off. Call on the game thread.
 	 */
 	SCULPTBRUSHPACKMORPH_API TArray<int32> GetBrushIdentifiers();
 

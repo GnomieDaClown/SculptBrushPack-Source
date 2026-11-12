@@ -1,10 +1,10 @@
 # Sculpt Brush Pack: Morph Targets
 
-An editor plugin for Unreal Engine 5.8 that adds six brushes for editing morph targets to the Skeletal Mesh Editor's
+An editor plugin for Unreal Engine 5.8 that adds seven brushes for editing morph targets to the Skeletal Mesh Editor's
 Sculpt Morph Target tool. Where an ordinary sculpt brush moves the surface, these work on what the morph target adds to
 it: one strengthens it, one smooths it, two are for correctives sculpted in a pose, mending what skinning does to the
-surface and raising wrinkles where it bunches up, and two copy it, from another morph target or mirrored from the other
-side of the mesh.
+surface and raising wrinkles where it bunches up, and three copy it: from another morph target, mirrored from the other
+side of the mesh, or from the other side of a mesh whose sides do not match.
 
 It needs the Sculpt Brush Pack (`SculptBrushPack`) and the engine's experimental plugin "Skeletal Mesh Morph Target
 Editing Tools". Built and tested against stock UE 5.8.4 (Win64).
@@ -22,7 +22,7 @@ tools with it.
 2. In the Morph Targets tab, pick the morph target to edit with its radio button, and give it a weight above 0. The tool
    drops any stroke made while the edited morph target's weight is 0.
 3. In the Morph palette, start Sculpt Morph Target.
-4. The six brushes are the last in the brush palette, after the engine's and the Sculpt Brush Pack's.
+4. The seven brushes are the last in the brush palette, after the engine's and the Sculpt Brush Pack's.
 
 They share one rule: the result of a stroke depends on where the brush went and how hard, not on how long it stayed.
 A second pass over the same place adds nothing, and a lighter pass takes nothing back.
@@ -139,6 +139,35 @@ The symmetry plane is X = 0 in the mesh's reference pose, and a point's partner 
 with, as for the editor's own Mirror and Flip commands on morph targets. Points the editor cannot pair are left alone. A
 point on the plane keeps the part of its shape that lies in the plane.
 
+## Asymmetry Morph
+
+The last brush in the palette, and always there. It is Mirror Morph for a mesh whose two sides do not match point for
+point: a face with one eye lower than the other, a body sculpted off its middle line, two sides with different
+topology. There the editor cannot pair the points, and Mirror Morph leaves them alone. With this brush you say where one
+side sits against the other, and it pairs the points by place.
+
+| Brush | What it does | How to use it |
+|---|---|---|
+| AsymmetryMorph | Gives each point you brush the shape of the nearest point to its mirror place, moved by an offset you set, mirrored. | Sculpt the shape on one side. Set **Offset** to where the other side's matching feature sits against a plain mirror image, brush the side that should receive, and change the Offset until the shape lands where it should. Undo and brush again to compare. |
+
+- **Offset** is in the mesh's own units, along its own axes in the reference pose, and says where the +X side sits
+  against the mirror image of the -X side. At 0 the brush looks straight across the plane X = 0. If the +X eye is 0.3
+  lower than a mirror image of the -X eye would be, the Offset is 0.3 down.
+- It works the same from either side: a point on the -X side looks at its mirror place plus the Offset, a point on the
+  +X side at the mirror place of itself less the Offset. Two points that find each other one way round find each other
+  the other way round too.
+- **The nearest point is always taken**: of all the mesh's points in its reference pose, the one nearest to that place,
+  and of several equally near the one with the lowest number. There is no distance beyond which the brush gives up, so
+  a wrong Offset copies from the wrong place and does not fail. With part of the mesh isolated, the hidden part is
+  still looked in.
+- **Copy From** is as for Mirror Morph: Other Side changes every brushed point; +X Side or -X Side changes only the
+  points of the opposite side, so the side you sculpted cannot be brushed away. With an X in the Offset the two sides
+  meet where X is half of it.
+- A point whose nearest point is itself, as on the middle line, keeps the part of its shape that lies in the plane.
+- It does nothing while the tool's own Symmetry is on, and the tool's panel says so.
+- One Offset holds for a stroke, and for the whole brush: it moves the other side as one piece and does not turn or
+  stretch it. Where the two sides differ by more than a shift, use a different Offset for each part.
+
 ## How it reads the tool
 
 A morph brush has to know where each point stands without the edited morph target, what the other morph targets would do
@@ -160,17 +189,23 @@ reads it through a class that derives from the tool and is never created (`FMorp
 
 `Private/Tests/SculptBrushPackMorphTests.cpp`, under the automation filter `SculptBrushPackMorph`:
 
-- Seven tests of the brushes' rules, compared exactly with values worked out by hand, including the warnings. Mush
+- Nine tests of the brushes' rules, compared exactly with values worked out by hand, including the warnings. Mush
   Morph's: a mesh that the pose only turns and moves is left as it is, and a bump the pose flattened gets its detail
   back. Nu Wrinkle's, with an even rise: the compression, a map read at texel centers, mid grey, tiling, an alpha, and
   Ctrl. Nu Wrinkle's folds: the three profiles, Cut Between, Spacing, Irregularity, Soften, a stroke that has to move
-  before its folds can be laid, and Build Up.
+  before its folds can be laid, and Build Up. Asymmetry Morph's: where a point's source is looked for from either side,
+  the nearest point with no Offset and with one, two points equally near, Copy From, where the sides meet, the report
+  with Symmetry on, and a sculpt mesh that is part of the whole. Its nearest-point search is tested by itself: at 2001
+  places, 868 of them with several points equally near, it gives the same point as looking at all 600 in turn.
 - A test that opens the Skeletal Mesh Editor on a copy of the engine's skeletal cube with two morph targets, starts
   Sculpt Morph Target and checks the palette and what the brushes read from the tool. The palette is checked three
-  times: as the plugin is set (six morph brushes), with the console variable off after a tool was left on MirrorMorph
-  (four, and the tool starts on the engine's Move), and with it on again (six). It also checks that the tool gives
-  every point its place with the pose taken off and its place in the UVs.
-- A test that makes a real stroke with each of the six brushes on that cube and reads the morph target back. Nu
+  times: as the plugin is set (seven morph brushes), with the console variable off after a tool was left on MirrorMorph
+  (five, and the tool starts on the engine's Move), and with it on again (seven). It also checks that the tool gives
+  every point its place with the pose taken off, its place in the UVs, and its place and the morph's delta in the
+  reference pose.
+- A test that makes a real stroke with each of the seven brushes on that cube and reads the morph target back.
+  Asymmetry Morph, with its Offset a cube's width to one side, gives a corner the shape of the corner found there and
+  not of the one straight across. Nu
   Wrinkle raises a corner with Only Where Compressed off, and with it on reports that nothing is compressed; with
   Folds on, a stroke in one place reports that it did not move, and a dragged one changes points. The Sculpt Brush
   Pack's LegacyWrinkle is dragged the same way and changes points. Mush Morph reports that it cannot measure the cube's
@@ -195,6 +230,10 @@ their host project and runs the tests headless.
   for: the engine ships no such mesh to test on. Its tutorial character is made of stiff pieces that share no points
   across a joint, so the posed test squashes one piece by scaling its bone. What that test judges is that the brushes
   act on a posed mesh through the tool, not that the result looks right. Nobody has tried them by hand.
+- **Asymmetry Morph has not been used on an asymmetric character**, by hand or in a test: the tests are six points
+  worked out by hand and a cube. Nothing in the viewport shows where a point's source lies, so the Offset is found by
+  trying. The time its search takes on a dense mesh is not measured; the points are put in order when a stroke first
+  needs them and again only when the mesh's reference places change.
 - **How Nu Wrinkle's folds and the three maps look on a character is not known.** The tests judge the numbers of
   the rule and that strokes act through the tool. Spacing, the profiles and the maps' scale were chosen without seeing
   them on a model.

@@ -35,6 +35,7 @@ namespace SculptBrushPackMorph
 		inline constexpr int32 MirrorMorph = 2104;
 		inline constexpr int32 MushMorph = 2105;
 		inline constexpr int32 NuWrinkle = 2106;
+		inline constexpr int32 AsymmetryMorph = 2107;
 	}
 
 	/** What the mesh's symmetry gives the mirror brush for one vertex. The symmetry plane is X = 0 in the reference pose. */
@@ -56,9 +57,9 @@ namespace SculptBrushPackMorph
 	 * tests implement it by hand.
 	 *
 	 * Threading: a brush calls BeginStroke, EndStroke, GetMeshWithoutMorph, PrepareVertices, GetSourceNames,
-	 * GetUnposedPosition, GetUV, IsToolSymmetryOn and ReportProblem from the game thread only. GetSourceOffset and
-	 * GetMirroredOffset are called from worker threads, for the vertices of the last PrepareVertices call, and must not
-	 * change the context.
+	 * GetUnposedPosition, GetUV, GetReferencePointCount, GetReferencePoint, GetReferencePointOf, IsToolSymmetryOn and
+	 * ReportProblem from the game thread only. GetSourceOffset, GetMirroredOffset and GetOffsetOfDelta are called from
+	 * worker threads, for the vertices of the last PrepareVertices call, and must not change the context.
 	 */
 	class IMorphBrushContext
 	{
@@ -106,6 +107,28 @@ namespace SculptBrushPackMorph
 		 * when the mesh has no such channel or the vertex no place in it.
 		 */
 		virtual bool GetUV(int32 Vertex, int32 Channel, FVector2d& OutUV) const { return false; }
+
+		/**
+		 * How many point numbers the whole mesh has for GetReferencePoint: every number below it may be asked for. The
+		 * whole mesh is the asset's. With part of it isolated it is more than the sculpt mesh, and it keeps its own
+		 * numbering. 0 when not known.
+		 */
+		virtual int32 GetReferencePointCount() const { return 0; }
+
+		/**
+		 * A point of the whole mesh: its place in the reference pose without any morph target, and the edited morph's
+		 * delta there, kept for the reference pose, as it was when the stroke began. False where the number is not in use.
+		 */
+		virtual bool GetReferencePoint(int32 Point, FVector3d& OutPlace, FVector3d& OutDelta) const { return false; }
+
+		/** The number, for GetReferencePoint, of a vertex of the sculpt mesh. INDEX_NONE when not known. */
+		virtual int32 GetReferencePointOf(int32 Vertex) const { return INDEX_NONE; }
+
+		/**
+		 * The offset that a delta kept for the reference pose makes at a vertex of the shown mesh, at the edited morph's
+		 * weight: what posing does to it there. False when not known.
+		 */
+		virtual bool GetOffsetOfDelta(int32 Vertex, const FVector3d& Delta, FVector3d& OutOffset) const { return false; }
 
 		/**
 		 * Whether the tool's own Symmetry setting is in force. With it on, the tool moves every stamp to the +X side and
@@ -186,7 +209,7 @@ public:
 	TFunction<TArray<FName>()> SourceNames;
 };
 
-/** Which side of the mesh Mirror Morph copies from. The mesh's symmetry plane is X = 0. */
+/** Which side of the mesh Mirror Morph and Asymmetry Morph copy from. The mesh's symmetry plane is X = 0. */
 UENUM()
 enum class ESculptBrushPackMirrorSource : uint8
 {
@@ -211,6 +234,32 @@ public:
 	 * opposite side change, so the side copied from cannot be brushed away by mistake.
 	 */
 	UPROPERTY(EditAnywhere, Category = MirrorMorph, meta = (DisplayName = "Copy From"))
+	ESculptBrushPackMirrorSource CopyFrom = ESculptBrushPackMirrorSource::OtherSide;
+};
+
+UCLASS()
+class USculptBrushPackAsymmetryMorphOpProps : public USculptBrushPackOpProps
+{
+	GENERATED_BODY()
+public:
+	USculptBrushPackAsymmetryMorphOpProps();
+
+	/**
+	 * Where the +X side of the mesh sits against a plain mirror image of its -X side, in the mesh's own units and along
+	 * its own axes in the reference pose. A brushed point on the -X side takes its shape from the point nearest to its
+	 * mirror place plus this Offset; a brushed point on the +X side, from the point nearest to the mirror place of
+	 * itself less this Offset. At 0 the brush looks straight across the plane X = 0. With an X in it, the two sides meet
+	 * where X is half of that. Change it until the shape lands where it should. Read when a stroke begins.
+	 */
+	UPROPERTY(EditAnywhere, Category = AsymmetryMorph, meta = (DisplayName = "Offset"))
+	FVector Offset = FVector::ZeroVector;
+
+	/**
+	 * Which side the brushed points take their shape from. Other Side: each brushed point takes the shape of the point
+	 * found across from it, so brush the side that should receive. +X Side or -X Side: only points on the opposite side
+	 * change, so the side copied from cannot be brushed away by mistake.
+	 */
+	UPROPERTY(EditAnywhere, Category = AsymmetryMorph, meta = (DisplayName = "Copy From"))
 	ESculptBrushPackMirrorSource CopyFrom = ESculptBrushPackMirrorSource::OtherSide;
 };
 
@@ -529,6 +578,104 @@ namespace SculptBrushPackMorph
 		/** How many of the stroke's points the mesh's symmetry had something for. Counted from worker threads. */
 		mutable std::atomic<int32> PointsWithMirror{ 0 };
 		bool bToldOfNoPartner = false;
+	};
+
+	/**
+	 * Finds, among a set of points, the one nearest to a place without looking at them all: the points are kept as a
+	 * tree that halves them along their longest extent, again and again. The answer is exact. No point of the set is
+	 * nearer than the one given, and of several equally near the one with the lowest number is given.
+	 */
+	class FNearestPointFinder
+	{
+	public:
+		/** Takes the points: Places[i] is the place of the point numbered Numbers[i]. A place that is not finite is left out. */
+		void Build(const TArray<FVector3d>& InPlaces, const TArray<int32>& InNumbers);
+		void Reset();
+		int32 Num() const { return Points.Num(); }
+
+		/** The number of the point nearest to Place, and its place. INDEX_NONE when there is none. Any thread, once built. */
+		int32 FindNearest(const FVector3d& Place, FVector3d* OutPlace = nullptr) const;
+
+	private:
+		struct FPoint
+		{
+			FVector3d Place;
+			int32 Number;
+		};
+
+		/** Puts the points of a range in the tree's order. */
+		void Order(int32 Low, int32 High);
+		void Search(int32 Low, int32 High, const FVector3d& Place, double& BestSquared, int32& Best) const;
+
+		/**
+		 * The points in the tree's order. The middle point of a range of more than a few splits it along Axes[middle]:
+		 * no point before it lies further along that axis than it does, and none after it less far.
+		 */
+		TArray<FPoint> Points;
+		TArray<uint8> Axes;
+	};
+
+	/**
+	 * Asymmetry Morph. Mirror Morph for a mesh whose two sides do not match point for point, so that the editor's
+	 * symmetry cannot pair them: the artist says with an Offset where one side sits against the mirror image of the
+	 * other, and the brush pairs the points by place.
+	 *
+	 * All of it is worked out in the mesh's reference pose without any morph target. A brushed point's source is looked
+	 * for at its mirror place across X = 0, moved by the Offset: for a point on the -X side, mirror place + Offset; for a
+	 * point on the +X side, the mirror place of (place - Offset). Either way round, two points that are each other's
+	 * source stay so. The two sides meet where X is half the Offset's X. The source is the point of the whole mesh
+	 * nearest to that place, the lowest numbered of several equally near; with part of the mesh isolated it may be a
+	 * point that is not shown.
+	 *
+	 * At full reach a point's offset is the mirror image of the delta its source had when the stroke began. A point
+	 * whose source stands at its own place keeps the part of its own delta that lies in the plane, as a point on the
+	 * plane does with Mirror Morph. With Copy From at +X Side or -X Side only the points of the opposite side change.
+	 * It does nothing while the tool's Symmetry is on, and says so.
+	 */
+	class FAsymmetryMorphBrushOp : public FMorphBrushOp
+	{
+	public:
+		using FMorphBrushOp::FMorphBrushOp;
+		virtual void BeginStroke(const FDynamicMesh3* Mesh, const FSculptBrushStamp& Stamp, const TArray<int32>& InitialVertices) override;
+
+		/**
+		 * Where the source of a point that stands at Place in the reference pose is looked for, and which side the point
+		 * is on.
+		 */
+		static FVector3d SourcePlace(const FVector3d& Place, const FVector3d& Offset, bool& bOutOnPositiveSide);
+
+	protected:
+		virtual bool NeedsOffsets() const override { return true; }
+		virtual void PrepareStamp(const FSculptBrushStamp& Stamp, const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices) override;
+		virtual FVector3d FullTarget(const FSculptBrushStamp& Stamp, int32 Vertex, const FVector3d& Before, const FVector3d& Base) const override;
+
+	private:
+		/** What is known of a vertex of the sculpt mesh in the stroke under way. */
+		enum class ESource : uint8
+		{
+			/** Its source has not been looked for yet. */
+			Unknown,
+			/** It takes the delta in Mirrored. */
+			Found,
+			/** It keeps its shape: it is on the side copied from, or nothing is known of its place. */
+			Keeps,
+		};
+
+		FVector3d Offset = FVector3d::ZeroVector;
+		ESculptBrushPackMirrorSource CopyFrom = ESculptBrushPackMirrorSource::OtherSide;
+		/** Whether the stroke under way can act: the tool's Symmetry is off and the mesh's points are known. */
+		bool bCanAct = false;
+
+		/** The whole mesh's points in the reference pose, by point number, and the edited morph's deltas there. */
+		TArray<FVector3d> Places;
+		TArray<FVector3d> Deltas;
+		TArray<bool> bInUse;
+		/** The tree over Places. Kept from stroke to stroke while the places are the same. */
+		FNearestPointFinder Finder;
+
+		/** Per vertex of the sculpt mesh: what is known of its source, and the source's delta, mirrored. */
+		TArray<ESource> Sources;
+		TArray<FVector3d> Mirrored;
 	};
 
 	/**

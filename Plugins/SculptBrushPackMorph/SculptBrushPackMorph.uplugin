@@ -3,7 +3,7 @@
 	"Version": 3,
 	"VersionName": "0.3.0",
 	"FriendlyName": "Sculpt Brush Pack: Morph Targets",
-	"Description": "Adds six brushes for editing morph targets to the Skeletal Mesh Editor's Sculpt Morph Target tool: Amplify Morph, Smooth Morph, Mush Morph, Nu Wrinkle, Clone Morph and Mirror Morph, with three wrinkle maps for Nu Wrinkle. It needs the Sculpt Brush Pack and Unreal's experimental Skeletal Mesh Morph Target Editing Tools. Built and tested for Unreal Engine 5.8 on Win64.",
+	"Description": "Adds seven brushes for editing morph targets to the Skeletal Mesh Editor's Sculpt Morph Target tool: Amplify Morph, Smooth Morph, Mush Morph, Nu Wrinkle, Clone Morph, Mirror Morph and Asymmetry Morph, with three wrinkle maps for Nu Wrinkle. It needs the Sculpt Brush Pack and Unreal's experimental Skeletal Mesh Morph Target Editing Tools. Built and tested for Unreal Engine 5.8 on Win64.",
 	"Category": "Geometry",
 	"CreatedBy": "Joseph Wiginton",
 	"CreatedByURL": "",

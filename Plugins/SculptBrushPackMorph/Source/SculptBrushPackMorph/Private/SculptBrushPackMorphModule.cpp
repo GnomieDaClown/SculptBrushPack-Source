@@ -50,7 +50,7 @@ namespace Private
 	// Switched off, this leaves Clone Morph and Mirror Morph out of the brush palette. It is read when a tool starts.
 	static TAutoConsoleVariable<bool> CVarCloneAndMirror(
 		TEXT("SculptBrushPackMorph.CloneAndMirror"), true,
-		TEXT("true: Sculpt Morph Target tools that start get all six morph brushes. false: they get Amplify Morph, Smooth Morph, Mush Morph and Nu Wrinkle, without Clone Morph and Mirror Morph."));
+		TEXT("true: Sculpt Morph Target tools that start get all seven morph brushes. false: they get them without Clone Morph and Mirror Morph."));
 
 	/**
 	 * The brushes' knowledge of the edited morph, read from the tool. One per tool, shared by its morph brushes.
@@ -309,6 +309,40 @@ namespace Private
 			return true;
 		}
 
+		virtual int32 GetReferencePointCount() const override
+		{
+			return ToolMesh && Edited ? ToolMesh->MaxVertexID() : 0;
+		}
+
+		virtual bool GetReferencePoint(int32 Point, FVector3d& OutPlace, FVector3d& OutDelta) const override
+		{
+			if (!ToolMesh || !Edited || !ToolMesh->IsVertex(Point))
+			{
+				return false;
+			}
+			// The tool's mesh stands in the reference pose without any morph target, and the tool works a stroke into
+			// the morph's deltas only when the stroke ends (MorphTargetVertexSculptTool.cpp:473-556).
+			OutPlace = ToolMesh->GetVertex(Point);
+			Edited->GetValue(Point, OutDelta);
+			return true;
+		}
+
+		virtual int32 GetReferencePointOf(int32 Vertex) const override
+		{
+			const int32 ToolVertex = ToToolMesh(Vertex);
+			return ToolMesh && ToolMesh->IsVertex(ToolVertex) ? ToolVertex : INDEX_NONE;
+		}
+
+		virtual bool GetOffsetOfDelta(int32 Vertex, const FVector3d& Delta, FVector3d& OutOffset) const override
+		{
+			if (!IsPrepared(Vertex))
+			{
+				return false;
+			}
+			OutOffset = ShownOffset(Vertex, Delta);
+			return true;
+		}
+
 		virtual bool GetUV(int32 Vertex, int32 Channel, FVector2d& OutUV) const override
 		{
 			const int32 ToolVertex = ToToolMesh(Vertex);
@@ -529,22 +563,21 @@ namespace Private
 		OutBrushes.Add(MakeBrush<FSmoothMorphBrushOp, USculptBrushPackSmoothMorphOpProps>(BrushID::SmoothMorph, LOCTEXT("SmoothMorph", "SmoothMorph"), Icons / TEXT("Rig_WeightSmooth.svg"), Context));
 		OutBrushes.Add(MakeBrush<FMushMorphBrushOp, USculptBrushPackMushMorphOpProps>(BrushID::MushMorph, LOCTEXT("MushMorph", "MushMorph"), Icons / TEXT("Rig_PoseBrush.svg"), Context));
 		OutBrushes.Add(MakeBrush<FNuWrinkleBrushOp, USculptBrushPackNuWrinkleOpProps>(BrushID::NuWrinkle, LOCTEXT("NuWrinkle", "NuWrinkle"), Icons / TEXT("Deform_Wave.svg"), Context));
-		if (!CVarCloneAndMirror.GetValueOnGameThread())
+		if (CVarCloneAndMirror.GetValueOnGameThread())
 		{
-			return;
+			SculptBrushPack::FExtraBrush Clone = MakeBrush<FCloneMorphBrushOp, USculptBrushPackCloneMorphOpProps>(BrushID::CloneMorph, LOCTEXT("CloneMorph", "CloneMorph"), Icons / TEXT("Rig_MorphTarget.svg"), Context);
+			// The Source setting lists the other morph targets of the mesh, read when the list is opened.
+			Clone.MakeSettings = [Context](UMeshVertexSculptTool& ForTool) -> UMeshSculptBrushOpProps*
+			{
+				USculptBrushPackCloneMorphOpProps* Settings = NewObject<USculptBrushPackCloneMorphOpProps>(&ForTool);
+				Settings->SourceNames = [Context]() { return Context->GetSourceNames(); };
+				return Settings;
+			};
+			OutBrushes.Add(MoveTemp(Clone));
+
+			OutBrushes.Add(MakeBrush<FMirrorMorphBrushOp, USculptBrushPackMirrorMorphOpProps>(BrushID::MirrorMorph, LOCTEXT("MirrorMorph", "MirrorMorph"), Icons / TEXT("Rig_WeightMirror.svg"), Context));
 		}
-
-		SculptBrushPack::FExtraBrush Clone = MakeBrush<FCloneMorphBrushOp, USculptBrushPackCloneMorphOpProps>(BrushID::CloneMorph, LOCTEXT("CloneMorph", "CloneMorph"), Icons / TEXT("Rig_MorphTarget.svg"), Context);
-		// The Source setting lists the other morph targets of the mesh, read when the list is opened.
-		Clone.MakeSettings = [Context](UMeshVertexSculptTool& ForTool) -> UMeshSculptBrushOpProps*
-		{
-			USculptBrushPackCloneMorphOpProps* Settings = NewObject<USculptBrushPackCloneMorphOpProps>(&ForTool);
-			Settings->SourceNames = [Context]() { return Context->GetSourceNames(); };
-			return Settings;
-		};
-		OutBrushes.Add(MoveTemp(Clone));
-
-		OutBrushes.Add(MakeBrush<FMirrorMorphBrushOp, USculptBrushPackMirrorMorphOpProps>(BrushID::MirrorMorph, LOCTEXT("MirrorMorph", "MirrorMorph"), Icons / TEXT("Rig_WeightMirror.svg"), Context));
+		OutBrushes.Add(MakeBrush<FAsymmetryMorphBrushOp, USculptBrushPackAsymmetryMorphOpProps>(BrushID::AsymmetryMorph, LOCTEXT("AsymmetryMorph", "AsymmetryMorph"), Icons / TEXT("Sculpt_SymmetryPlane.svg"), Context));
 	}
 
 	TSharedPtr<IMorphBrushContext> MakeToolContext(UMeshVertexSculptTool* Tool)
@@ -581,6 +614,7 @@ TArray<int32> GetBrushIdentifiers()
 	{
 		Identifiers.Append({ BrushID::CloneMorph, BrushID::MirrorMorph });
 	}
+	Identifiers.Add(BrushID::AsymmetryMorph);
 	return Identifiers;
 }
 
