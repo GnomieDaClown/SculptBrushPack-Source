@@ -8,8 +8,8 @@
 // numbers and halves. No tolerance is used. The editor tests open the Skeletal Mesh Editor on a copy of the engine's
 // skeletal cube with two morph targets, start Sculpt Morph Target, and make strokes through the tool.
 //
-// Clone Morph and Mirror Morph are out of the brush palette unless the plugin's console variable is on. Their rules are
-// tested as the others'; a test that needs them in a tool switches the variable on for its length.
+// Clone Morph and Mirror Morph leave the brush palette when the plugin's console variable is switched off. A test that
+// needs them in a tool sets the variable for its length, whatever it was.
 
 #include "CoreMinimal.h"
 #include "Animation/AnimCurveMetadata.h"
@@ -953,7 +953,7 @@ namespace SculptBrushPackMorphTestLocals
 	 */
 	static void CheckPalette(FAutomationTestBase& Test, UMeshVertexSculptTool& Tool, bool bExpectCloneAndMirror)
 	{
-		const TCHAR* Which = bExpectCloneAndMirror ? TEXT("With Clone and Mirror Morph asked for") : TEXT("As the plugin is set");
+		const TCHAR* Which = bExpectCloneAndMirror ? TEXT("As the plugin is set") : TEXT("With Clone and Mirror Morph switched off");
 		TArray<int32> Palette;
 		for (const UMeshSculptToolBase::FBrushTypeInfo& Type : Tool.GetAvailableBrushTypes())
 		{
@@ -972,8 +972,8 @@ namespace SculptBrushPackMorphTestLocals
 			bInOrder = Palette[EngineBrushes + Index] == Expected[Index];
 		}
 		Test.TestTrue(FString::Printf(TEXT("%s: the pack's brushes and then the morph brushes follow the engine's, in order"), Which), bInOrder);
-		Test.TestTrue(FString::Printf(TEXT("%s: Clone Morph is in the palette only when asked for"), Which), Palette.Contains(BrushID::CloneMorph) == bExpectCloneAndMirror);
-		Test.TestTrue(FString::Printf(TEXT("%s: Mirror Morph is in the palette only when asked for"), Which), Palette.Contains(BrushID::MirrorMorph) == bExpectCloneAndMirror);
+		Test.TestTrue(FString::Printf(TEXT("%s: Clone Morph is in the palette unless switched off"), Which), Palette.Contains(BrushID::CloneMorph) == bExpectCloneAndMirror);
+		Test.TestTrue(FString::Printf(TEXT("%s: Mirror Morph is in the palette unless switched off"), Which), Palette.Contains(BrushID::MirrorMorph) == bExpectCloneAndMirror);
 
 		for (const int32 Identifier : GetBrushIdentifiers())
 		{
@@ -996,11 +996,11 @@ bool FSculptBrushPackMorphEditorTest::RunTest(const FString& Parameters)
 {
 	using namespace SculptBrushPackMorphTestLocals;
 
-	// As the plugin is set unless asked otherwise: Clone Morph and Mirror Morph are not in the palette.
-	FScopedCloneAndMirror CloneAndMirror(false);
+	// As the plugin is set: all six morph brushes are in the palette.
+	FScopedCloneAndMirror CloneAndMirror(true);
 	TestTrue(TEXT("The plugin has its console variable for Clone Morph and Mirror Morph"), CloneAndMirror.IsFound());
-	TestFalse(TEXT("The variable is off unless asked for"), CloneAndMirror.IsOnByDefault());
-	TestTrue(TEXT("With it off the morph brushes are Amplify, Smooth, Mush and Wrinkle Morph"), GetBrushIdentifiers() == TArray<int32>({ BrushID::AmplifyMorph, BrushID::SmoothMorph, BrushID::MushMorph, BrushID::WrinkleMorph }));
+	TestTrue(TEXT("The variable is on unless switched off"), CloneAndMirror.IsOnByDefault());
+	TestTrue(TEXT("With it on the morph brushes are six"), GetBrushIdentifiers() == TArray<int32>({ BrushID::AmplifyMorph, BrushID::SmoothMorph, BrushID::MushMorph, BrushID::WrinkleMorph, BrushID::CloneMorph, BrushID::MirrorMorph }));
 
 	// PackLift moves every point 1 up.
 	FMorphToolSession Session;
@@ -1009,7 +1009,7 @@ bool FSculptBrushPackMorphEditorTest::RunTest(const FString& Parameters)
 		UMeshVertexSculptTool* Tool = Session.Tool;
 		TestTrue(TEXT("It is the engine's morph sculpt tool"), IsMorphSculptTool(Tool));
 		TestTrue(TEXT("The Sculpt Brush Pack knows the tool"), SculptBrushPack::IsSupportedTool(Tool));
-		CheckPalette(*this, *Tool, /*bExpectCloneAndMirror*/ false);
+		CheckPalette(*this, *Tool, /*bExpectCloneAndMirror*/ true);
 
 		// What the brushes read from the tool. Before the tool's first tick it has not posed its mesh, and the brushes are
 		// told so; after it they can read the mesh.
@@ -1095,22 +1095,22 @@ bool FSculptBrushPackMorphEditorTest::RunTest(const FString& Parameters)
 			Context->EndStroke();
 		}
 
-		// With the console variable on, a tool that starts gets Clone Morph and Mirror Morph as well.
-		CloneAndMirror.Set(true);
-		TestTrue(TEXT("With the variable on the morph brushes are six"), GetBrushIdentifiers() == TArray<int32>({ BrushID::AmplifyMorph, BrushID::SmoothMorph, BrushID::MushMorph, BrushID::WrinkleMorph, BrushID::CloneMorph, BrushID::MirrorMorph }));
+		// A tool left on Mirror Morph, and the variable switched off: the next tool does not have that brush. It starts
+		// on the engine's Move; asked for a brush it lacks it would fail an engine ensure, which this test would report
+		// as an error. Its palette holds the four other morph brushes.
+		Session.Tool->SetActiveBrushType(BrushID::MirrorMorph);
+		CloneAndMirror.Set(false);
+		TestTrue(TEXT("With the variable off the morph brushes are Amplify, Smooth, Mush and Wrinkle Morph"), GetBrushIdentifiers() == TArray<int32>({ BrushID::AmplifyMorph, BrushID::SmoothMorph, BrushID::MushMorph, BrushID::WrinkleMorph }));
 		if (RestartTool(*this, Session))
 		{
-			CheckPalette(*this, *Session.Tool, /*bExpectCloneAndMirror*/ true);
+			TestEqual(TEXT("A tool that starts without Mirror Morph, after one left on it, starts on the engine's Move"), Session.Tool->SculptProperties->PrimaryBrushID, static_cast<int32>(EMeshVertexSculptBrushType::Move));
+			CheckPalette(*this, *Session.Tool, /*bExpectCloneAndMirror*/ false);
 
-			// A tool left on Mirror Morph, and the variable switched off: the next tool does not have that brush. It
-			// starts on the engine's Move; asked for a brush it lacks it would fail an engine ensure, which this test
-			// would report as an error.
-			Session.Tool->SetActiveBrushType(BrushID::MirrorMorph);
-			CloneAndMirror.Set(false);
+			// Switched on again, the next tool has all six.
+			CloneAndMirror.Set(true);
 			if (RestartTool(*this, Session))
 			{
-				TestEqual(TEXT("A tool that starts without Mirror Morph, after one left on it, starts on the engine's Move"), Session.Tool->SculptProperties->PrimaryBrushID, static_cast<int32>(EMeshVertexSculptBrushType::Move));
-				CheckPalette(*this, *Session.Tool, /*bExpectCloneAndMirror*/ false);
+				CheckPalette(*this, *Session.Tool, /*bExpectCloneAndMirror*/ true);
 			}
 		}
 	}
@@ -1170,7 +1170,8 @@ bool FSculptBrushPackMorphStrokesTest::RunTest(const FString& Parameters)
 	using namespace SculptBrushPackMorphTestLocals;
 	using SculptBrushPackMorph::Private::FMorphToolAccess;
 
-	// The test strokes with all four brushes, so the two that are out of the palette are asked for.
+	// The test strokes with all six brushes, so Clone Morph and Mirror Morph are kept in the palette whatever the console
+	// variable was.
 	FScopedCloneAndMirror CloneAndMirror(true);
 
 	// PackLift moves the points of the cube's +X half by (0.5, 0, 1) and leaves the -X half: a shape on one side only.

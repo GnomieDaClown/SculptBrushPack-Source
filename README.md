@@ -7,7 +7,7 @@ in Modeling Mode and in the Skeletal Mesh Editor.
 | Plugin | What it adds |
 |---|---|
 | [`Plugins/SculptBrushPack`](Plugins/SculptBrushPack/README.md) | Eighteen brushes: Clay, Clay Strips, Crease, Blob, Dam Standard, Snake Hook, Move Topological, Layer, Fill, Scrape, Nudge, Thumb, TopoSlide, Relax, Glide, Tube, Noise and Sharpen. |
-| [`Plugins/SculptBrushPackMorph`](Plugins/SculptBrushPackMorph/README.md) | Four brushes for morph targets, in the Skeletal Mesh Editor's Sculpt Morph Target tool: Amplify Morph, Smooth Morph, Mush Morph and Wrinkle Morph. It needs the first plugin and the engine's experimental morph target editing tools. |
+| [`Plugins/SculptBrushPackMorph`](Plugins/SculptBrushPackMorph/README.md) | Six brushes for morph targets, in the Skeletal Mesh Editor's Sculpt Morph Target tool: Amplify Morph, Smooth Morph, Mush Morph, Wrinkle Morph, Clone Morph and Mirror Morph. It needs the first plugin and the engine's experimental morph target editing tools. |
 
 Each plugin's README says what every brush does, where it appears, how it gets into the engine's tool, how it is tested
 and what is not covered.

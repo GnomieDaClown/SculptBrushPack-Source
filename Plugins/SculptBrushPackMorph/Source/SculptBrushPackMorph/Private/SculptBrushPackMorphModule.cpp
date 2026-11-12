@@ -47,10 +47,10 @@ namespace Private
 
 	static const FName ProviderName(TEXT("SculptBrushPackMorph"));
 
-	// Clone Morph and Mirror Morph are left out of the brush palette unless this is on. It is read when a tool starts.
+	// Switched off, this leaves Clone Morph and Mirror Morph out of the brush palette. It is read when a tool starts.
 	static TAutoConsoleVariable<bool> CVarCloneAndMirror(
-		TEXT("SculptBrushPackMorph.CloneAndMirror"), false,
-		TEXT("false: Sculpt Morph Target tools that start get Amplify Morph, Smooth Morph, Mush Morph and Wrinkle Morph. true: they also get Clone Morph and Mirror Morph."));
+		TEXT("SculptBrushPackMorph.CloneAndMirror"), true,
+		TEXT("true: Sculpt Morph Target tools that start get all six morph brushes. false: they get Amplify Morph, Smooth Morph, Mush Morph and Wrinkle Morph, without Clone Morph and Mirror Morph."));
 
 	/**
 	 * The brushes' knowledge of the edited morph, read from the tool. One per tool, shared by its morph brushes.

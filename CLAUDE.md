@@ -11,9 +11,9 @@ Repository: https://github.com/GnomieDaClown/SculptBrushPack-Source (public; the
   Unreal Engine 5.8, so they run without being compiled. The repository holds source only:
   - `Plugins/SculptBrushPack` adds eighteen brushes to the engine's Vertex Sculpt tools (Modeling Mode's Vertex Sculpt, the
     Skeletal Mesh Editor's Sculpt and Sculpt Morph Target).
-  - `Plugins/SculptBrushPackMorph` adds morph target brushes to Sculpt Morph Target: Amplify Morph, Smooth Morph, Mush Morph
-    and Wrinkle Morph. Two more, Clone Morph and Mirror Morph, are in the code but out of the palette unless the console variable
-    `SculptBrushPackMorph.CloneAndMirror` is on. This plugin needs the first one and the engine's experimental plugin
+  - `Plugins/SculptBrushPackMorph` adds morph target brushes to Sculpt Morph Target: Amplify Morph, Smooth Morph, Mush Morph,
+    Wrinkle Morph, Clone Morph and Mirror Morph. The last two leave the palette when the console variable
+    `SculptBrushPackMorph.CloneAndMirror` is switched off. This plugin needs the first one and the engine's experimental plugin
     `SkeletalMeshMorphTargetEditingTools`, which its descriptor enables.
 - Written for **Unreal Engine 5.8**; built and tested on stock 5.8.4, Win64, MSVC. Nothing else has been tried.
 - Each plugin's `README.md` is the reference for what the brushes do, how they get into the engine's tools, how they are
