@@ -1,17 +1,17 @@
 # Sculpt Brush Pack: Morph Targets
 
-An editor plugin for Unreal Engine 5.8 that adds two brushes for editing morph targets to the Skeletal Mesh Editor's
+An editor plugin for Unreal Engine 5.9 that adds two brushes for editing morph targets to the Skeletal Mesh Editor's
 Sculpt Morph Target tool. Where an ordinary sculpt brush moves the surface, these work on what the morph target adds to
 it: one strengthens it, the other smooths it. Two more brushes, which copy it from another morph target and mirror it
 across the mesh, are in the plugin but out of the palette for now; see "Clone Morph and Mirror Morph" below.
 
 It needs the Sculpt Brush Pack (`SculptBrushPack`) and the engine's experimental plugin "Skeletal Mesh Morph Target
-Editing Tools". Built and tested against stock UE 5.8.4 (Win64).
+Editing Tools". Built and tested against stock UE 5.9.0 (Win64).
 
 ## Installing
 
 Copy the `SculptBrushPack` and `SculptBrushPackMorph` folders into your project's `Plugins` folder and enable both in the
-Plugins window. A release archive's folders hold prebuilt binaries for Unreal Engine 5.8, so nothing has to be compiled;
+Plugins window. A release archive's folders hold prebuilt binaries for Unreal Engine 5.9, so nothing has to be compiled;
 without the `Binaries` folders, build the project. Enabling this plugin enables the engine's experimental morph target
 tools with it.
 
@@ -69,7 +69,7 @@ reads it through a class that derives from the tool and is never created (`FMorp
 `Private/SculptBrushPackMorphToolAccess.h`), which may form pointers to the tool's protected members.
 
 - The plugin is tied to the engine version it is built for, and to a plugin the engine marks experimental; it is marked
-  experimental itself for that reason. The build stops with a message on an engine other than 5.8. If one of the
+  experimental itself for that reason. The build stops with a message on an engine other than 5.9. If one of the
   tool's members is renamed or removed, the build fails in that one header; if its type changes, a `static_assert`
   beside it fails. The header's comment lists what each member is taken to mean.
 - No skinning is worked out in the plugin. A morph target's deltas are kept for the reference pose; what posing does to a
@@ -98,7 +98,7 @@ their host project and runs the tests headless.
 
 - The strokes in the tests are on a cube in its reference pose. Untested: a mesh with bones moved, a paused animation
   frame, part of the mesh isolated, the symmetry of a real character, pen pressure, a packaged build, engine versions
-  other than 5.8.4.
+  other than 5.9.0.
 - The warnings are tested as text handed to the tool; that the editor shows them in its panel was read in the engine's
   source, not checked on screen.
 - The icons are the nearest ones in the project's icon library, not drawn for these brushes.
@@ -117,5 +117,5 @@ It needs the Sculpt Brush Pack, which is under the same licence and whose brushe
 sculpt source. The morph brushes themselves are this project's own designs.
 
 The plugin contains no Unreal Engine code and no code copied from Blender. Release archives hold its source and a
-prebuilt Win64 editor binary for Unreal Engine 5.8. Using it needs Unreal Engine, which comes under Epic Games' own
+prebuilt Win64 editor binary for Unreal Engine 5.9. Using it needs Unreal Engine, which comes under Epic Games' own
 licence.

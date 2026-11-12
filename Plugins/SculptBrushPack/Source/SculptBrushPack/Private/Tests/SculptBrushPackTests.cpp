@@ -222,7 +222,7 @@ namespace SculptBrushPackTestLocals
 		}
 		const TArray<int32> Pack = GetBrushIdentifiers();
 		const int32 EngineBrushes = Palette.Num() - Pack.Num();
-		// Eighteen in 5.8.4, and Erase Sculpt Layer when the target has sculpt layers (MeshVertexSculptTool.cpp:380-460).
+		// Eighteen in 5.9.0, and Erase Sculpt Layer when the target has sculpt layers (MeshVertexSculptTool.cpp:380-460).
 		Test->TestTrue(TEXT("The engine's brushes are still there"), EngineBrushes >= 18);
 		Test->AddInfo(FString::Printf(TEXT("%s: %d engine brushes, then %d of the pack."), *Tool->GetClass()->GetName(), EngineBrushes, Pack.Num()));
 		bool bInOrder = Palette.Num() >= Pack.Num();
@@ -771,7 +771,7 @@ bool FSculptBrushPackGlideTest::RunTest(const FString& Parameters)
 	// A sheet folded along X = 0: flat where X is negative, falling one for one where X is positive. Its point at
 	// (-2, 0, 0) is carried to (2, 1, 0), off the sheet. The nearest point of the sheet is on the slope: (1, 1, -1), the
 	// square root of 2 away, where the flat part is 2 away. The numbers are chosen so that the engine's nearest-point
-	// arithmetic is exact (DistPoint3Triangle3.h:49-195 in 5.8.4 divides by an edge's squared length, here 12, and
+	// arithmetic is exact (DistPoint3Triangle3.h:49-195 in 5.9.0 divides by an edge's squared length, here 12, and
 	// carrying the point to (2, 0.5, 0) gives a Y one rounding step from 0.5).
 	{
 		const FDynamicMesh3 Folded = MakeSheet([](double X) { return X > 0.0 ? -X : 0.0; });
@@ -1065,9 +1065,9 @@ bool FSculptBrushPackSkeletalMeshEditorTest::RunTest(const FString& Parameters)
 		FAssetEditorToolkit* Toolkit = static_cast<FAssetEditorToolkit*>(Instance);
 		FEditorModeTools& Modes = Toolkit->GetEditorModeManager();
 
-		// The editor's editing tools are a mode of their own (SkeletalMeshModelingToolsEditorMode.cpp:240 in 5.8.4). The
-		// editor switches it on as it opens unless the user switched it off last time (SkeletalMeshModelingToolsModule.cpp:196-205);
-		// otherwise this presses the toolbar's Editing Tools button (SkeletalMeshModelingToolsCommands.cpp:21).
+		// The editor's editing tools are a mode of their own (SkeletalMeshModelingToolsEditorMode.cpp:264 in 5.9.0). The
+		// editor switches it on as it opens unless the user switched it off last time (SkeletalMeshModelingToolsModule.cpp:198-207);
+		// otherwise this presses the toolbar's Editing Tools button (SkeletalMeshModelingToolsCommands.cpp:22).
 		const FEditorModeID EditingTools(TEXT("SkeletalMeshModelingToolsEditorMode"));
 		if (!Modes.IsModeActive(EditingTools))
 		{
@@ -1085,7 +1085,7 @@ bool FSculptBrushPackSkeletalMeshEditorTest::RunTest(const FString& Parameters)
 			WatchToolManagers();
 
 			// Sculpt, in the Deform palette: the same tool class as Modeling Mode's Vertex Sculpt
-			// (SkeletalMeshModelingToolsEditorMode.cpp:375-379).
+			// (SkeletalMeshModelingToolsEditorMode.cpp:412-416).
 			const bool bStarted = ToolManager->SelectActiveToolType(EToolSide::Left, TEXT("BeginSculptMeshTool")) && ToolManager->ActivateTool(EToolSide::Left);
 			UMeshVertexSculptTool* Tool = Cast<UMeshVertexSculptTool>(ToolManager->GetActiveTool(EToolSide::Left));
 			if (TestTrue(TEXT("Sculpt started in the Skeletal Mesh Editor"), bStarted) && TestNotNull(TEXT("Its sculpt tool"), Tool))

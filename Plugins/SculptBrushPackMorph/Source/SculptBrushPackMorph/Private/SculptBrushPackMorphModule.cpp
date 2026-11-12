@@ -6,7 +6,7 @@
 //
 // That knowledge is the tool's own state: the mesh without the edited morph, the pose and weights the shown mesh was
 // posed with, and its copy of the asset's mesh with every morph target's deltas. The tool offers no public way to read
-// it, so it is read through SculptBrushPackMorphToolAccess.h. Engine anchors are for 5.8.4.
+// it, so it is read through SculptBrushPackMorphToolAccess.h. Engine anchors are for 5.9.0.
 
 #include "SculptBrushPackMorph.h"
 
@@ -90,7 +90,7 @@ namespace Private
 				return false;
 			}
 			// The tool divides by this weight when the stroke ends, and drops the stroke when it is zero
-			// (MorphTargetVertexSculptTool.cpp:485-492, :536). The test is the tool's own.
+			// (MorphTargetVertexSculptTool.cpp:552-559, :603). The test is the tool's own.
 			const FName EditedName = FMorphToolAccess::MorphName(*MorphTool);
 			const float* Weight = FMorphToolAccess::Weights(*MorphTool).Find(EditedName);
 			if (!Weight || FMath::IsNearlyZero(*Weight))
@@ -121,7 +121,7 @@ namespace Private
 			Edited = Attribute;
 			EditedWeight = *Weight;
 			BoneMatrices = SkeletalMeshToolsHelper::ComputeBoneMatrices(FMorphToolAccess::RefPose(*MorphTool), FMorphToolAccess::Pose(*MorphTool));
-			// With part of the mesh isolated the sculpt mesh numbers its vertices anew (MorphTargetVertexSculptTool.cpp:519-525).
+			// With part of the mesh isolated the sculpt mesh numbers its vertices anew (MorphTargetVertexSculptTool.cpp:586-592).
 			Isolation = FMorphToolAccess::Isolation(*MorphTool);
 			if (bMirror)
 			{
@@ -213,7 +213,7 @@ namespace Private
 			{
 				const FMatrix3d Unpose(Unposed[1][Index] - Unposed[0][Index], Unposed[2][Index] - Unposed[0][Index], Unposed[3][Index] - Unposed[0][Index], /*bRows*/ false);
 				// A vertex whose skinning cannot be turned back is treated as not skinned. The limit is the one below which
-				// the engine's own inverse fails an ensure (MatrixTypes.h:186-203).
+				// the engine's own inverse fails an ensure (MatrixTypes.h:186-192, with the test at :206).
 				const double Determinant = Unpose.Determinant();
 				const bool bInvertible = FMath::IsFinite(Determinant) && FMath::Abs(Determinant) >= TMathUtil<double>::Epsilon;
 				Linear[SculptVertices[Index]] = bInvertible ? Unpose.Inverse() : FMatrix3d::Identity();
@@ -252,7 +252,7 @@ namespace Private
 				FVector3d PartnerDelta;
 				Edited->GetValue(Partner, PartnerDelta);
 				OutOffset = ShownOffset(Vertex, Symmetry->GetMirroredAxis(PartnerDelta));
-				// The editor's symmetry plane is X = 0 (SKMBackedDynaMeshComponent.cpp:1284), and the engine's own mirror
+				// The editor's symmetry plane is X = 0 (SKMBackedDynaMeshComponent.cpp:1520), and the engine's own mirror
 				// takes the side by the same test (SkeletalMeshToolsHelper.cpp:428).
 				return Position.X >= 0.0 ? EMorphMirror::PositiveX : EMorphMirror::NegativeX;
 			}
@@ -294,7 +294,7 @@ namespace Private
 		virtual void ReportProblem(const FText& Problem) override
 		{
 			// The editor shows a tool's warning in its panel until another replaces it
-			// (SkeletalMeshModelingToolsEditorModeToolkit.cpp:664-668), so only a change is sent, and an empty text takes
+			// (SkeletalMeshModelingToolsEditorModeToolkit.cpp:674-678), so only a change is sent, and an empty text takes
 			// back a warning of this context's own and no one else's.
 			UMorphTargetVertexSculptTool* MorphTool = GetTool();
 			UInteractiveToolManager* Manager = MorphTool ? MorphTool->GetToolManager() : nullptr;

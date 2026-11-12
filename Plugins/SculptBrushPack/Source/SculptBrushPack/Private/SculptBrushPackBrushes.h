@@ -8,7 +8,7 @@
 // Each brush from Clay to Relax takes its displacement rule and constants from Blender's sculpt source, cited as
 // blender/<path>:<line> in tag v5.2.3 unless another tag is named. Glide, Tube, Noise and Sharpen are this project's own
 // designs; their rules are stated at each class. All run on Unreal's own stroke: the stamp, its strength and its falloff
-// come from the sculpt tool (Sculpting/MeshBrushOpBase.h in 5.8.4). Positions are in the tool's local space, in which
+// come from the sculpt tool (Sculpting/MeshBrushOpBase.h in 5.9.0). Positions are in the tool's local space, in which
 // Vertex Sculpt has baked the object's scale.
 //
 // Several brushes ask the tool for the surface as it was before the stroke (EStampInputMeshType::BaseMesh) and write
@@ -27,7 +27,7 @@
 namespace SculptBrushPack
 {
 	/**
-	 * Brush identifiers in the sculpt tools. The engine's own brushes use EMeshVertexSculptBrushType, below 20 in 5.8.4
+	 * Brush identifiers in the sculpt tools. The engine's own brushes use EMeshVertexSculptBrushType, below 20 in 5.9.0
 	 * (MeshVertexSculptTool.h:59-118).
 	 */
 	namespace BrushID
@@ -57,7 +57,7 @@ namespace SculptBrushPack
 
 	/**
 	 * The strength of one stamp of a displacement brush as the engine's own brushes have it, without the radius and the
-	 * direction: Power x DeltaTime x 6 (MeshSculptBrushOps.h:39 and :71 in 5.8.4). It stands where Blender's rules have
+	 * direction: Power x DeltaTime x 6 (MeshSculptBrushOps.h:39 and :72 in 5.9.0). It stands where Blender's rules have
 	 * the brush strength.
 	 */
 	double StampStrength(const FSculptBrushStamp& Stamp);
@@ -573,7 +573,7 @@ namespace SculptBrushPack
 	 * follow each movement of the cursor, weighted by where they stood then, and after every stamp each is laid back onto
 	 * the nearest point of the surface as it was before the stroke. Only the piece of surface joined to the point under
 	 * the cursor moves, and the surface is kept for laying back within four brush radii of where the stroke began, the
-	 * distance the engine's own brushes search for the surface (MeshSculptBrushOps.h:148 in 5.8.4); a point cannot glide
+	 * distance the engine's own brushes search for the surface (MeshSculptBrushOps.h:150 in 5.9.0); a point cannot glide
 	 * past that. Beyond "joined by edges" it knows nothing of hidden surfaces or closed mouths.
 	 */
 	class FGlideBrushOp : public FMeshSculptBrushOp
@@ -604,7 +604,7 @@ namespace SculptBrushPack
 	 * its normal from before the stroke. A second pass, or holding still, adds nothing.
 	 *
 	 * The tool hands a stamp the points that lie within the brush now, after they have moved (MeshVertexSculptTool.cpp:736-745
-	 * in 5.8.4), so a point raised farther than the brush radius is not reached again in the same stroke.
+	 * in 5.9.0), so a point raised farther than the brush radius is not reached again in the same stroke.
 	 */
 	class FStrokeReachBrushOp : public FMeshSculptBrushOp
 	{

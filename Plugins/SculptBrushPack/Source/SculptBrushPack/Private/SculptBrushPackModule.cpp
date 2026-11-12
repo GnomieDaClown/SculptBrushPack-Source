@@ -5,10 +5,10 @@
 // tool runs (Modeling Mode in the level editor, the Skeletal Mesh Editor's editing tools).
 //
 // The engine has no public call that adds a brush to its sculpt tools: UMeshSculptToolBase::RegisterBrushType is protected
-// (Sculpting/MeshSculptToolBase.h:387 in 5.8.4), meant for subclasses, and a subclass would need its own tool button in
+// (Sculpting/MeshSculptToolBase.h:387 in 5.9.0), meant for subclasses, and a subclass would need its own tool button in
 // every editor. The pack instead listens to the tool managers (UInteractiveToolManager::OnToolPostBuild and
 // OnToolPostSetup, InteractiveToolManager.h:360-364) and registers its brushes on the tool itself, through FToolAccess
-// below. Engine anchors in this file are for 5.8.4.
+// below. Engine anchors in this file are for 5.9.0.
 //
 // Reloading: Live Coding patches the module in place and is safe. If the module is unloaded while a tool that has its
 // brushes is running, that tool is cancelled first, as it holds objects whose code lives here.
@@ -42,10 +42,10 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogSculptBrushPack, Log, All);
 
-// FToolAccess names protected members of the engine's sculpt tool as they are in 5.8 (read at 5.8.4, changelist
-// 58902052). Another engine version needs them read again before this is built for it.
-#if ENGINE_MAJOR_VERSION != 5 || ENGINE_MINOR_VERSION != 8
-#error "The Sculpt Brush Pack is written against the sculpt tools of Unreal Engine 5.8. See FToolAccess in SculptBrushPackModule.cpp."
+// FToolAccess names protected members of the engine's sculpt tool as they are in 5.9 (read at 5.9.0, changelist
+// 60351404). Another engine version needs them read again before this is built for it.
+#if ENGINE_MAJOR_VERSION != 5 || ENGINE_MINOR_VERSION != 9
+#error "The Sculpt Brush Pack is written against the sculpt tools of Unreal Engine 5.9. See FToolAccess in SculptBrushPackModule.cpp."
 #endif
 
 namespace SculptBrushPack
@@ -478,7 +478,7 @@ namespace Private
 
 		void OnLevelEditorModeChanged(const FEditorModeID& ModeID, bool bIsEntering)
 		{
-			// A mode that enters has made its tool manager by now (EditorModeManager.cpp:986-990).
+			// A mode that enters has made its tool manager by now (EditorModeManager.cpp:1081-1085).
 			if (bIsEntering)
 			{
 				WatchAll();
@@ -603,9 +603,9 @@ public:
 		Private::GToolWatcher = MakeShared<Private::FToolWatcher>();
 		// Every frame, and it does nothing unless a tool manager was created since the last one.
 		TickerHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateSP(Private::GToolWatcher.ToSharedRef(), &Private::FToolWatcher::Tick));
-		// The level editor's mode manager exists once the editor has started (UnrealEdGlobals.cpp:278-284, and the event
-		// at the end of that start-up, UnrealEdMisc.cpp:619); asking for it earlier fails an engine check
-		// (UnrealEdGlobals.cpp:193-200). A module loaded after that start-up does without this.
+		// The level editor's mode manager exists once the editor has started (UnrealEdGlobals.cpp:279-285, and the event
+		// at the end of that start-up, UnrealEdMisc.cpp:621); asking for it earlier fails an engine check
+		// (UnrealEdGlobals.cpp:194-201). A module loaded after that start-up does without this.
 		EditorInitializedHandle = FEditorDelegates::OnEditorInitialized.AddRaw(this, &FSculptBrushPackModule::OnEditorInitialized);
 		UE_LOG(LogSculptBrushPack, Log, TEXT("Sculpt Brush Pack started: %d brushes for the Vertex Sculpt tools."), Private::GetPackBrushes().Num());
 	}

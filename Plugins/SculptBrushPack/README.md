@@ -1,16 +1,16 @@
 # Sculpt Brush Pack
 
-An editor plugin for Unreal Engine 5.8 that adds eighteen brushes to the engine's own Vertex Sculpt tools. It has one
+An editor plugin for Unreal Engine 5.9 that adds eighteen brushes to the engine's own Vertex Sculpt tools. It has one
 editor module, depends on engine modules only, and adds no tool, mode or asset type of its own: the brushes appear in the
 brush palette of the tools you already use.
 
-Built and tested against stock UE 5.8.4 (Win64). It is not built for other engine versions; see "How it gets into the
+Built and tested against stock UE 5.9.0 (Win64). It is not built for other engine versions; see "How it gets into the
 tool" for why the version matters.
 
 ## Installing
 
 Copy the `SculptBrushPack` folder into your project's `Plugins` folder and enable the plugin in the Plugins window. A
-release archive's folder holds a prebuilt binary for Unreal Engine 5.8, so nothing has to be compiled; without the
+release archive's folder holds a prebuilt binary for Unreal Engine 5.9, so nothing has to be compiled; without the
 `Binaries` folder, build the project. The plugin needs the engine plugins `MeshModelingToolset` and
 `GeometryProcessing`, which Modeling Mode already enables.
 
@@ -65,7 +65,7 @@ tool's protected members through a class that derives from the tool and is never
 
 Consequences a maintainer should know:
 
-- The plugin is tied to the engine version it is built for. The build stops with a message on an engine other than 5.8.
+- The plugin is tied to the engine version it is built for. The build stops with a message on an engine other than 5.9.
   If one of the tool's protected members is renamed or removed, the build fails in that one struct; if its type
   changes, a `static_assert` beside it fails. What a member means cannot be checked by the compiler: the comment at
   `FToolAccess` lists what is assumed and has to be read again for another engine version.
@@ -123,7 +123,7 @@ host project and runs the tests headless.
 - The automated tests that start a tool check the palette; they make no stroke. The brushes have been tested by hand
   in the editor by the author.
 - Untested: symmetry and alphas with these brushes, pen pressure, Freeze Target being cleared, the module being
-  unloaded while a tool runs, a packaged build, engine versions other than 5.8.4.
+  unloaded while a tool runs, a packaged build, engine versions other than 5.9.0.
 - The tests compare exactly, which relies on the module being built with precise floating point (set in its
   `Build.cs`) and on one compiler; they were run with MSVC on Win64 only.
 - The cost of Glide's and Sharpen's first stamp on dense meshes is not measured.
@@ -143,5 +143,5 @@ Fourteen of its brushes follow rules and constants from Blender's sculpt source 
 Copyright Blender Authors, GNU General Public License version 2 or later); see "Where the rules come from".
 
 The plugin contains no Unreal Engine code and no code copied from Blender. Release archives hold its source and a
-prebuilt Win64 editor binary for Unreal Engine 5.8. Using it needs Unreal Engine, which comes under Epic Games' own
+prebuilt Win64 editor binary for Unreal Engine 5.9. Using it needs Unreal Engine, which comes under Epic Games' own
 licence.

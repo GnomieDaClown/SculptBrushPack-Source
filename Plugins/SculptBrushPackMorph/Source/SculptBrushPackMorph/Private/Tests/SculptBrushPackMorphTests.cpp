@@ -536,7 +536,7 @@ namespace SculptBrushPackMorphTestLocals
 		}
 		Session.Mesh->CommitMeshDescription(0);
 		// The animation system gives a curve to a morph target only when the curve is marked as a morph target's
-		// (AnimCurveMetadata.h:162-176 in 5.8.4); an importer marks it, so the test does.
+		// (AnimCurveMetadata.h:162-176 in 5.9.0); an importer marks it, so the test does.
 		UAnimCurveMetaData* Curves = Session.Mesh->GetAssetUserData<UAnimCurveMetaData>();
 		if (!Curves)
 		{
@@ -559,8 +559,8 @@ namespace SculptBrushPackMorphTestLocals
 			return false;
 		}
 		// The editor's editing tools are a mode of their own. The editor switches it on as it opens unless the user
-		// switched it off last time (SkeletalMeshModelingToolsModule.cpp:196-205); otherwise this presses the toolbar's
-		// Editing Tools button (SkeletalMeshModelingToolsCommands.cpp:21).
+		// switched it off last time (SkeletalMeshModelingToolsModule.cpp:198-207); otherwise this presses the toolbar's
+		// Editing Tools button (SkeletalMeshModelingToolsCommands.cpp:22).
 		FAssetEditorToolkit* Toolkit = static_cast<FAssetEditorToolkit*>(Session.Editor);
 		if (!Toolkit->GetEditorModeManager().IsModeActive(FEditorModeID(TEXT("SkeletalMeshModelingToolsEditorMode"))))
 		{
@@ -578,8 +578,8 @@ namespace SculptBrushPackMorphTestLocals
 		}
 
 		// The morph target to edit is picked with a radio button in the Morph Targets tab; the test sets what the button
-		// sets (SkeletalMeshModelingToolsEditorMode.h:239-240). The tools read weights from the animation instance of the
-		// editor's preview component (SkeletalMeshEditingCache.cpp:609-638, :853-857), so the morph gets its full weight
+		// sets (SkeletalMeshModelingToolsEditorMode.h:246-247). The tools read weights from the animation instance of the
+		// editor's preview component (SkeletalMeshEditingCache.cpp:630-659, :888-892), so the morph gets its full weight
 		// there, as a preview curve.
 		FNameProperty* Editing = FindFProperty<FNameProperty>(Mode->GetClass(), TEXT("EditingMorphTarget"));
 		if (!Test.TestNotNull(TEXT("The editing tools' EditingMorphTarget property"), Editing))
@@ -688,7 +688,7 @@ namespace SculptBrushPackMorphTestLocals
 		Expected.Append(GetBrushIdentifiers());
 		const int32 EngineBrushes = Palette.Num() - Expected.Num();
 		Test.AddInfo(FString::Printf(TEXT("%s, %s: %d engine brushes, then %d of the pack, then %d morph brushes."), Which, *Tool.GetClass()->GetName(), EngineBrushes, PackBrushes, Expected.Num() - PackBrushes));
-		// Six in 5.8.4 (MorphTargetVertexSculptTool.cpp:287-320).
+		// Six in 5.9.0 (MorphTargetVertexSculptTool.cpp:320-353).
 		Test.TestTrue(FString::Printf(TEXT("%s: the engine's morph brushes are still there"), Which), EngineBrushes >= 6);
 		bool bInOrder = EngineBrushes >= 0;
 		for (int32 Index = 0; bInOrder && Index < Expected.Num(); ++Index)
@@ -734,6 +734,31 @@ bool FSculptBrushPackMorphEditorTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("It is the engine's morph sculpt tool"), IsMorphSculptTool(Tool));
 		TestTrue(TEXT("The Sculpt Brush Pack knows the tool"), SculptBrushPack::IsSupportedTool(Tool));
 		CheckPalette(*this, *Tool, /*bExpectCloneAndMirror*/ false);
+
+		// Since 5.9 the tool shows the mesh's wireframe, polygroup boundaries and seams over the sculpted mesh, with a
+		// settings panel of the engine's own (MorphTargetVertexSculptTool.cpp:232-262). The panel stays, with its
+		// wireframe and polygroup boundary switches, whichever brush of these plugins is the active one. The engine's
+		// class is known by its path, as for the tool.
+		TArray<int32> BrushesToTry = GetBrushIdentifiers();
+		BrushesToTry.Add(SculptBrushPack::GetBrushIdentifiers()[0]);
+		BrushesToTry.Add(static_cast<int32>(EMeshVertexSculptBrushType::Move));
+		for (const int32 Identifier : BrushesToTry)
+		{
+			Tool->SetActiveBrushType(Identifier);
+			const UObject* MeshElements = nullptr;
+			for (UObject* Object : Tool->GetToolProperties(/*bEnabledOnly*/ true))
+			{
+				if (Object && Object->GetClass()->GetPathName() == TEXT("/Script/ModelingComponents.MeshElementsVisualizerProperties"))
+				{
+					MeshElements = Object;
+				}
+			}
+			if (TestNotNull(FString::Printf(TEXT("With brush %d active the tool shows its mesh element display settings"), Identifier), MeshElements))
+			{
+				TestNotNull(FString::Printf(TEXT("With brush %d active: the polygroup boundary switch"), Identifier), FindFProperty<FBoolProperty>(MeshElements->GetClass(), TEXT("bShowGroupBoundaries")));
+				TestNotNull(FString::Printf(TEXT("With brush %d active: the wireframe switch"), Identifier), FindFProperty<FBoolProperty>(MeshElements->GetClass(), TEXT("bShowWireframe")));
+			}
+		}
 
 		// What the brushes read from the tool. Before the tool's first tick it has not posed its mesh, and the brushes are
 		// told so; after it they can read the mesh.
@@ -822,7 +847,7 @@ bool FSculptBrushPackMorphRememberedBrushTest::RunTest(const FString& Parameters
 	using namespace SculptBrushPackMorphTestLocals;
 
 	// The sculpt tools remember the brush used last, and Sculpt Morph Target and the plain Sculpt tool remember it under
-	// one key (MeshVertexSculptTool.cpp:287, :468-471 in 5.8.4). A tool asked for a brush it does not have fails an engine
+	// one key (MeshVertexSculptTool.cpp:287, :468-471 in 5.9.0). A tool asked for a brush it does not have fails an engine
 	// ensure, which this test would report as an error.
 	FMorphToolSession Session;
 	if (OpenSession(*this, TEXT("/Temp/SculptBrushPackMorph/RememberCube"), [](const FVector3f&) { return FVector3f(0.0f, 0.0f, 1.0f); }, Session))

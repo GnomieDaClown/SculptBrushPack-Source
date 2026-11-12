@@ -4,7 +4,7 @@
 // Sculpt Brush Pack: Morph Targets. Names the engine's morph sculpt tool's protected members for this module.
 //
 // What the brushes need to know of the edited morph target is that tool's own state, and the tool offers no public way
-// to read it (MorphTargetVertexSculptTool.h:97-140 in 5.8.4). See FMorphToolAccess below for the rule relied on, the
+// to read it (MorphTargetVertexSculptTool.h:149-207 in 5.9.0). See FMorphToolAccess below for the rule relied on, the
 // members read and what each is taken to mean.
 
 #pragma once
@@ -19,11 +19,11 @@
 
 #include <type_traits>
 
-// The members named below are those of the engine's morph sculpt tool in 5.8 (read at 5.8.4, changelist 58902052). The
+// The members named below are those of the engine's morph sculpt tool in 5.9 (read at 5.9.0, changelist 60351404). The
 // tool belongs to a plugin the engine marks experimental, and its class is not exported: its members can change in any
 // release, and a binary of this plugin built for one engine build must not be loaded in another.
-#if ENGINE_MAJOR_VERSION != 5 || ENGINE_MINOR_VERSION != 8
-#error "Sculpt Brush Pack: Morph Targets is written against the morph sculpt tool of Unreal Engine 5.8. See FMorphToolAccess."
+#if ENGINE_MAJOR_VERSION != 5 || ENGINE_MINOR_VERSION != 9
+#error "Sculpt Brush Pack: Morph Targets is written against the morph sculpt tool of Unreal Engine 5.9. See FMorphToolAccess."
 #endif
 
 namespace SculptBrushPackMorph::Private
@@ -55,15 +55,15 @@ namespace SculptBrushPackMorph::Private
 	 *
 	 * Members read, and what each is taken to mean (MorphTargetVertexSculptTool.h and .cpp):
 	 *  - GetMeshWithoutCurrentMorphFunc: gives the shown mesh without the edited morph, in the sculpt mesh's vertex
-	 *    numbering. Set when the tool registers its brushes (.cpp:327-334); valid once the tool has posed its mesh.
+	 *    numbering. Set when the tool registers its brushes (.cpp:360-367); valid once the tool has posed its mesh.
 	 *  - ToolDynamicMesh: the tool's copy of the asset's mesh in its reference pose, with every morph target's deltas
-	 *    as attributes. The tool writes the edited morph's deltas into it when a stroke ends (.cpp:513-556).
+	 *    as attributes. The tool writes the edited morph's deltas into it when a stroke ends (.cpp:580-623).
 	 *  - ToolMorphTargetName: the morph target being edited.
 	 *  - MorphTargetWeightsForPosedMesh and ComponentSpaceTransformsForPosedMesh: the weights and the pose the shown
-	 *    mesh was last posed with; both are empty until the tool's first tick (.cpp:719-765).
+	 *    mesh was last posed with; both are empty until the tool's first tick (.cpp:786-834).
 	 *  - ComponentSpaceTransformsRefPose: the reference pose, as many bones as the pose above once that is set.
 	 *  - IsolationSubmesh: the map between the sculpt mesh's vertices and the tool mesh's when part of the mesh is
-	 *    isolated (.cpp:519-525, :733-751).
+	 *    isolated (.cpp:586-592, :800-818).
 	 *  - EditorContext: the editor's context object, asked for the symmetry of the asset's mesh.
 	 *  - bApplySymmetry of UMeshVertexSculptTool (MeshVertexSculptTool.h:499): whether the tool's Symmetry is in force.
 	 *

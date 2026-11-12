@@ -13,7 +13,7 @@
 namespace SculptBrushPack
 {
 	/**
-	 * Whether a stroke type is one of the three the engine has in 5.8.4 (EMeshSculptStrokeType). A brush that works with
+	 * Whether a stroke type is one of the three the engine has in 5.9.0 (EMeshSculptStrokeType). A brush that works with
 	 * all of them names them through this, so that a type a later engine adds is not claimed without having been tried.
 	 */
 	inline bool IsKnownStrokeType(EMeshSculptStrokeType StrokeType)

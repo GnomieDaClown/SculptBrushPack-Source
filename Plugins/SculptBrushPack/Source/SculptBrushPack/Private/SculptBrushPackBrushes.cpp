@@ -18,7 +18,7 @@ namespace SculptBrushPack
 {
 namespace Private
 {
-	// The speed of the engine's displacement brushes (BrushSpeedTuning, MeshSculptBrushOps.h:39 and :98 in 5.8.4).
+	// The speed of the engine's displacement brushes (BrushSpeedTuning, MeshSculptBrushOps.h:39 and :99 in 5.9.0).
 	constexpr double EngineStampSpeed = 6.0;
 
 	// Blender's strength factors per brush (brush_strength, sculpt.cc).
@@ -70,7 +70,7 @@ namespace Private
 	/**
 	 * The pinch's strength (crease.cc, do_crease_or_blob_brush): the stamp's strength with the Strength setting divided out
 	 * and Pinch squared in its place. Blender divides by the setting squared because its strength is the setting squared
-	 * (sculpt.cc:2338-2339); the engine's is the setting itself (MeshSculptToolBase.cpp:1338-1363 in 5.8.4).
+	 * (sculpt.cc:2338-2339); the engine's is the setting itself (MeshSculptToolBase.cpp:1338-1363 in 5.9.0).
 	 */
 	double PinchStrength(const FSculptBrushStamp& Stamp, float StrengthSetting, float Pinch)
 	{
@@ -695,7 +695,7 @@ void FGlideBrushOp::BeginStroke(const FDynamicMesh3* Mesh, const FSculptBrushSta
 	}
 
 	// The surface joined to that point, out to four radii from the cursor (the engine's own brushes look for the surface
-	// that far, MeshSculptBrushOps.h:148 in 5.8.4). Mesh is still the mesh from before the stroke here, and a copy of that
+	// that far, MeshSculptBrushOps.h:150 in 5.9.0). Mesh is still the mesh from before the stroke here, and a copy of that
 	// piece is kept, as the mesh itself moves under the stroke.
 	const double KeepSquared = FMath::Square(4.0 * Stamp.Radius);
 	TArray<int32> LocalOf;
@@ -740,7 +740,7 @@ void FGlideBrushOp::BeginStroke(const FDynamicMesh3* Mesh, const FSculptBrushSta
 	SurfaceTree = MakeUnique<UE::Geometry::FDynamicMeshAABBTree3>(Surface.Get());
 
 	// Each brushed point of that piece is weighted by where it stands now, at the stroke's start, as the engine's Move
-	// weights its points (MeshMoveBrushOps.h:46-76 in 5.8.4).
+	// weights its points (MeshMoveBrushOps.h:46-76 in 5.9.0).
 	for (const int32 Vertex : InitialVertices)
 	{
 		if (LocalOf[Vertex] != INDEX_NONE)
@@ -923,7 +923,7 @@ double FSharpenBrushOp::FullHeight(const FSculptBrushStamp& Stamp, int32 Vertex,
 
 USculptBrushPackSnakeHookOpProps::USculptBrushPackSnakeHookOpProps()
 {
-	// The engine's Move brush's own defaults (MeshMoveBrushOps.h:22 and :26 in 5.8.4).
+	// The engine's Move brush's own defaults (MeshMoveBrushOps.h:22 and :26 in 5.9.0).
 	Strength = 1.0f;
 	Falloff = 0.5f;
 }
@@ -962,7 +962,7 @@ USculptBrushPackScrapeOpProps::USculptBrushPackScrapeOpProps()
 
 USculptBrushPackGlideOpProps::USculptBrushPackGlideOpProps()
 {
-	// The engine's Move brush's own defaults (MeshMoveBrushOps.h:22 and :26 in 5.8.4).
+	// The engine's Move brush's own defaults (MeshMoveBrushOps.h:22 and :26 in 5.9.0).
 	Strength = 1.0f;
 	Falloff = 0.5f;
 }

@@ -1,6 +1,6 @@
 # Sculpt Brush Pack: source
 
-The source of two editor plugins for Unreal Engine 5.8 that add sculpt brushes to the engine's own Vertex Sculpt tools.
+The source of two editor plugins for Unreal Engine 5.9 that add sculpt brushes to the engine's own Vertex Sculpt tools.
 They add no tool, mode or asset type of their own: the brushes appear in the brush palette of the tools you already use,
 in Modeling Mode and in the Skeletal Mesh Editor.
 
@@ -12,6 +12,8 @@ in Modeling Mode and in the Skeletal Mesh Editor.
 Each plugin's README says what every brush does, where it appears, how it gets into the engine's tool, how it is tested
 and what is not covered.
 
+**This is the `5.9` branch: the source for Unreal Engine 5.9.** The `main` branch holds the source for Unreal Engine 5.8.
+
 **This repository holds source only.** To use the plugins from here you compile them with your project. A packaged
 version with prebuilt binaries, which needs no compiling, is available from the author on request.
 
@@ -20,10 +22,10 @@ Bug reports and feature requests are welcome in this repository's issues.
 
 ## Requirements
 
-- **Unreal Engine 5.8.** Built and tested on stock 5.8.4, Win64. The build stops with a message on any other engine
+- **Unreal Engine 5.9.** Built and tested on stock 5.9.0, Win64. The build stops with a message on any other engine
   version: the plugins name protected members of the engine's sculpt tools, which can change from one version to the
   next.
-- Windows, with the C++ toolchain Unreal Engine 5.8 asks for, and a project with C++ targets.
+- Windows, with the C++ toolchain Unreal Engine 5.9 asks for, and a project with C++ targets.
 
 ## Building into a project
 

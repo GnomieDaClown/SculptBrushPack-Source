@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Joseph Wiginton.
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Sculpt Brush Pack. An editor plugin for Unreal Engine 5.8 that depends on engine modules only.
+// Sculpt Brush Pack. An editor plugin for Unreal Engine 5.9 that depends on engine modules only.
 
 using UnrealBuildTool;
 

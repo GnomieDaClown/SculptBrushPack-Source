@@ -310,7 +310,7 @@ USculptBrushPackSmoothMorphOpProps::USculptBrushPackSmoothMorphOpProps()
 USculptBrushPackCloneMorphOpProps::USculptBrushPackCloneMorphOpProps()
 {
 	// A copying brush wants a core where the copy is whole: the engine's Move brush's falloff (MeshMoveBrushOps.h:26 in
-	// 5.8.4), with which the inner half of the brush reaches fully.
+	// 5.9.0), with which the inner half of the brush reaches fully.
 	Strength = 1.0f;
 	Falloff = 0.5f;
 }

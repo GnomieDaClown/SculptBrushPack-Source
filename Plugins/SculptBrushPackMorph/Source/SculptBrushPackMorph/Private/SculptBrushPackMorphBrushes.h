@@ -3,10 +3,10 @@
 //
 // Sculpt Brush Pack: Morph Targets. Brushes that edit a morph target's difference from the base, for the engine's
 // Sculpt Morph Target tool in the Skeletal Mesh Editor. The plugin's README.md says how each is used. Engine anchors
-// are for 5.8.4.
+// are for 5.9.0.
 //
 // The tool shows the mesh as posed, with every active morph target applied, and works the edited morph's deltas out of
-// the sculpted mesh when a stroke ends (MorphTargetVertexSculptTool.cpp:473-556). So these brushes, like any other, only
+// the sculpted mesh when a stroke ends (MorphTargetVertexSculptTool.cpp:540-623). So these brushes, like any other, only
 // move the points of the shown mesh; what makes them morph brushes is that each knows where a point stands without the
 // edited morph. A point's offset is its place less that place: what the edited morph adds there, as shown.
 
@@ -62,7 +62,7 @@ namespace SculptBrushPackMorph
 		/**
 		 * Called when a stroke begins; bMirror says whether mirrored offsets will be asked for. False when the morph
 		 * cannot be edited now, for instance because its weight is zero, at which the tool drops the stroke
-		 * (MorphTargetVertexSculptTool.cpp:488-492). The brush then moves nothing, and the context has told the user why
+		 * (MorphTargetVertexSculptTool.cpp:555-559). The brush then moves nothing, and the context has told the user why
 		 * where there is something the user can do about it.
 		 */
 		virtual bool BeginStroke(bool bMirror) = 0;
