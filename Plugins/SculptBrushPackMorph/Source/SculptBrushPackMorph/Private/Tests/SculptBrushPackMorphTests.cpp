@@ -26,6 +26,7 @@
 #include "InteractiveToolManager.h"
 #include "MeshDescription.h"
 #include "MeshVertexSculptTool.h"
+#include "ReferenceSkeleton.h"
 #include "Misc/AutomationTest.h"
 #include "SculptBrushPack.h"
 #include "SculptBrushPackMorph.h"
@@ -38,6 +39,7 @@
 #include "UObject/Package.h"
 #include "UObject/UObjectIterator.h"
 #include "UObject/UnrealType.h"
+#include "VectorUtil.h"
 
 #include <initializer_list>
 
@@ -773,17 +775,23 @@ namespace SculptBrushPackMorphTestLocals
 		IAssetEditorInstance* Editor = nullptr;
 		UInteractiveToolManager* ToolManager = nullptr;
 		UMeshVertexSculptTool* Tool = nullptr;
+		/** The editor's preview component, whose animation instance gives the tools their morph weights and whose bones give them the pose. */
+		USkeletalMeshComponent* Preview = nullptr;
 	};
+
+	const TCHAR* const SkeletalCubePath = TEXT("/Engine/EngineMeshes/SkeletalCube.SkeletalCube");
+	/** A character from the engine's tutorial content: stiff pieces, one to a bone, each a joined surface of its own. */
+	const TCHAR* const CharacterPath = TEXT("/Engine/Tutorial/SubEditors/TutorialAssets/Character/TutorialTPP.TutorialTPP");
 
 	/**
 	 * LiftAt gives PackLift's delta for a point of the cube in its reference pose; PackShift moves every point 2 along X.
 	 * False when the tool could not be started; what was opened is closed by CloseSession either way.
 	 */
-	static bool OpenSession(FAutomationTestBase& Test, const TCHAR* PackageName, TFunctionRef<FVector3f(const FVector3f&)> LiftAt, FMorphToolSession& Session)
+	static bool OpenSession(FAutomationTestBase& Test, const TCHAR* PackageName, TFunctionRef<FVector3f(const FVector3f&)> LiftAt, FMorphToolSession& Session, const TCHAR* SourcePath = SkeletalCubePath)
 	{
-		// A copy of the engine's skeletal cube in a package of its own: the engine's asset is not opened for editing.
-		USkeletalMesh* Source = LoadObject<USkeletalMesh>(nullptr, TEXT("/Engine/EngineMeshes/SkeletalCube.SkeletalCube"));
-		if (!Test.TestNotNull(TEXT("The engine's skeletal cube"), Source))
+		// A copy of the engine's mesh in a package of its own: the engine's asset is not opened for editing.
+		USkeletalMesh* Source = LoadObject<USkeletalMesh>(nullptr, SourcePath);
+		if (!Test.TestNotNull(TEXT("The engine's skeletal mesh"), Source))
 		{
 			return false;
 		}
@@ -869,6 +877,7 @@ namespace SculptBrushPackMorphTestLocals
 			if (Preview)
 			{
 				Preview->SetPreviewCurveOverride(LiftName, 1.0f, /*bRemoveIfZero*/ false);
+				Session.Preview = *It;
 				It->TickAnimation(0.0f, /*bNeedsValidRootMotion*/ false);
 				It->RefreshBoneTransforms();
 			}
@@ -919,10 +928,17 @@ namespace SculptBrushPackMorphTestLocals
 	 * One stroke that stays in one place: the ray comes straight down (or up, for a point of the underside) onto Point of
 	 * the shown mesh. The tool applies a stroke's stamps on its ticks (MeshSculptToolBase.cpp:647-692).
 	 */
+	static bool StrokeAlong(UMeshVertexSculptTool& Tool, const FRay& Ray);
+
 	static bool Stroke(UMeshVertexSculptTool& Tool, const FVector3d& Point, bool bFromAbove)
 	{
 		const FVector Direction = bFromAbove ? FVector(0, 0, -1) : FVector(0, 0, 1);
-		const FRay Ray(FVector(Point) - Direction * 1000.0, Direction);
+		return StrokeAlong(Tool, FRay(FVector(Point) - Direction * 1000.0, Direction));
+	}
+
+	/** One stroke that stays in one place, where Ray meets the shown mesh. */
+	static bool StrokeAlong(UMeshVertexSculptTool& Tool, const FRay& Ray)
+	{
 		FHitResult Hit;
 		if (!Tool.HitTest(Ray, Hit))
 		{
@@ -987,6 +1003,257 @@ namespace SculptBrushPackMorphTestLocals
 			Test.TestEqual(FString::Printf(TEXT("%s: with morph brush %d active, one settings object of this plugin's shows"), Which, Identifier), OwnSettings, 1);
 		}
 	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSculptBrushPackMorphWrinkleMapTest, "SculptBrushPackMorph.Brushes.WrinkleMapFromATexture",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FSculptBrushPackMorphWrinkleMapTest::RunTest(const FString& Parameters)
+{
+	using namespace SculptBrushPackMorph;
+
+	// A texture of two by two texels, black but for the second texel of the first row, which is white. The engine's
+	// reader needs a texture that has both its source pixels, which it reads in the editor, and its platform data
+	// (Texture2DUtil.cpp:286-293 in 5.8.4).
+	UTexture2D* Texture = UTexture2D::CreateTransient(2, 2, PF_B8G8R8A8);
+	if (!TestNotNull(TEXT("A texture of two by two texels"), Texture))
+	{
+		return true;
+	}
+	Texture->SRGB = false;
+	const uint8 Pixels[16] = { 0, 0, 0, 255,  255, 255, 255, 255,  0, 0, 0, 255,  0, 0, 0, 255 };
+	Texture->Source.Init(2, 2, 1, 1, TSF_BGRA8, Pixels);
+
+	FWrinkleMorphBrushOp::FMapImage Map;
+	if (TestTrue(TEXT("The texture is read as a Wrinkle Map"), FWrinkleMorphBrushOp::ReadTextureAsMap(Texture, Map)))
+	{
+		TestEqual(TEXT("The map is two texels wide"), Map.GetDimensions().GetWidth(), 2);
+		TestEqual(TEXT("and two high"), Map.GetDimensions().GetHeight(), 2);
+		TestEqual(TEXT("The first texel of the first row is black: 0"), Map.GetPixel(0, 0), 0.0f, 0.0f);
+		TestEqual(TEXT("The second texel of the first row is white: 1"), Map.GetPixel(1, 0), 1.0f, 0.0f);
+		TestEqual(TEXT("The first texel of the second row is black: 0"), Map.GetPixel(0, 1), 0.0f, 0.0f);
+		TestEqual(TEXT("The second texel of the second row is black: 0"), Map.GetPixel(1, 1), 0.0f, 0.0f);
+		// The white texel's center is at (0.75, 0.25) of the map, where the brush reads a point with those UVs.
+		TestEqual(TEXT("Read at the white texel's center, the map gives 1"), Map.BilinearSampleUV<float, UE::Geometry::EImageTilingMethod::Wrap>(FVector2d(0.75, 0.25), 0.0f), 1.0f, 0.0f);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSculptBrushPackMorphPosedTest, "SculptBrushPackMorph.Hook.MushAndWrinkleOnAPosedCharacter",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FSculptBrushPackMorphPosedTest::RunTest(const FString& Parameters)
+{
+	using namespace SculptBrushPackMorphTestLocals;
+	using SculptBrushPackMorph::Private::FMorphToolAccess;
+
+	// The engine's tutorial character, with a morph target that moves every point an eighth up, at full weight.
+	FMorphToolSession Session;
+	if (OpenSession(*this, TEXT("/Temp/SculptBrushPackMorph/PosedCharacter"), [](const FVector3f&) { return FVector3f(0.0f, 0.0f, 0.125f); }, Session, CharacterPath))
+	{
+		UMeshVertexSculptTool* Tool = Session.Tool;
+		UMorphTargetVertexSculptTool& MorphTool = static_cast<UMorphTargetVertexSculptTool&>(*Tool);
+		const FReferenceSkeleton& Skeleton = Session.Mesh->GetRefSkeleton();
+		const int32 Elbow = Skeleton.FindBoneIndex(TEXT("lowerarm_l"));
+		AddInfo(FString::Printf(TEXT("The character has %d bones; lowerarm_l is bone %d."), Skeleton.GetNum(), Elbow));
+
+		if (TestTrue(TEXT("The character has a left forearm"), Elbow != INDEX_NONE)
+			&& TestNotNull(TEXT("The editor's preview component"), Session.Preview)
+			&& TestEqual(TEXT("The preview component has a transform for every bone"), Session.Preview->GetComponentSpaceTransforms().Num(), Skeleton.GetNum()))
+		{
+			// The pose: the left forearm squashed to six tenths of its size along each of its bone's axes but one. The
+			// character is made of stiff pieces, one to a bone, which share no points across a joint, so turning a joint
+			// shortens no surface; scaling a bone squashes its piece, and that does. The tools take the pose from the
+			// preview component's bone transforms (SkeletalMeshEditingCache.cpp:520-528 in 5.8.4), which an animation
+			// would write; the test writes the one transform itself, in place, and nothing refreshes it before the tool
+			// reads it on its next tick.
+			TArray<FTransform>& Pose = const_cast<TArray<FTransform>&>(Session.Preview->GetComponentSpaceTransforms());
+			Pose[Elbow].SetScale3D(FVector(1.0, 0.6, 0.6));
+			Tool->Tick(0.03f);
+
+			// Where the squashed forearm's surface is shortened most: measured as Wrinkle Morph measures it, with what the brushes
+			// read from the tool.
+			const UDynamicMesh* MeshObject = FMorphToolAccess::ToolMesh(MorphTool);
+			const FDynamicMesh3* Mesh = MeshObject ? MeshObject->GetMeshPtr() : nullptr;
+			const UE::Geometry::FDynamicMeshMorphTargetAttribute* Lift = Mesh && Mesh->HasAttributes() ? Mesh->Attributes()->GetMorphTargetAttribute(LiftName) : nullptr;
+			const TSharedPtr<IMorphBrushContext> Context = Private::MakeToolContext(Tool);
+			// The point to brush: the most shortened one that a ray down its own normal meets, as some lie inside a joint
+			// behind another piece.
+			struct FShortened
+			{
+				int32 Vertex = INDEX_NONE;
+				double Shorter = 0.0;
+				FVector3d Place = FVector3d::Zero();
+				FVector3d Normal = FVector3d::Zero();
+			};
+			TArray<FShortened> Shortened;
+			int32 Most = INDEX_NONE;
+			double MostShorter = 0.0;
+			FVector3d MostPlace = FVector3d::Zero();
+			FVector3d MostNormal = FVector3d::Zero();
+			if (TestNotNull(TEXT("The tool's mesh has the edited morph"), Lift) && TestTrue(TEXT("The tool gives the brushes a context"), Context.IsValid())
+				&& TestTrue(TEXT("In the pose, with the morph at full weight, a stroke can begin"), Context->BeginStroke(/*bMirror*/ false)))
+			{
+				const FDynamicMesh3* Without = Context->GetMeshWithoutMorph();
+				if (TestNotNull(TEXT("The posed mesh without the edited morph"), Without))
+				{
+					for (const int32 Vertex : Mesh->VertexIndicesItr())
+					{
+						FVector3d Rest;
+						if (!Without->IsVertex(Vertex) || !Context->GetUnposedPosition(Vertex, /*bWithEditedMorph*/ false, Rest))
+						{
+							continue;
+						}
+						double PosedLength = 0.0;
+						double RestLength = 0.0;
+						bool bKnown = true;
+						for (const int32 Neighbor : Mesh->VtxVerticesItr(Vertex))
+						{
+							FVector3d RestNeighbor;
+							bKnown = bKnown && Without->IsVertex(Neighbor) && Context->GetUnposedPosition(Neighbor, /*bWithEditedMorph*/ false, RestNeighbor);
+							if (!bKnown)
+							{
+								break;
+							}
+							PosedLength += UE::Geometry::Distance(Without->GetVertex(Neighbor), Without->GetVertex(Vertex));
+							RestLength += UE::Geometry::Distance(RestNeighbor, Rest);
+						}
+						const double Shorter = bKnown && RestLength > 0.0 ? 1.0 - PosedLength / RestLength : 0.0;
+						if (Shorter > 0.02)
+						{
+							FShortened Point;
+							Point.Vertex = Vertex;
+							Point.Shorter = Shorter;
+							Point.Place = Without->GetVertex(Vertex);
+							for (const int32 Triangle : Mesh->VtxTrianglesItr(Vertex))
+							{
+								const UE::Geometry::FIndex3i Corners = Mesh->GetTriangle(Triangle);
+								Point.Normal += UE::Geometry::VectorUtil::NormalDirection(Without->GetVertex(Corners.A), Without->GetVertex(Corners.B), Without->GetVertex(Corners.C));
+							}
+							Point.Normal = UE::Geometry::Normalized(Point.Normal);
+							Shortened.Add(Point);
+						}
+					}
+				}
+				Context->EndStroke();
+			}
+			// The ray comes down a point's normal from a little way off, and must meet the mesh within a unit of the
+			// point; the brush is four units wide.
+			Shortened.Sort([](const FShortened& A, const FShortened& B) { return A.Shorter > B.Shorter; });
+			for (const FShortened& Point : Shortened)
+			{
+				FHitResult Hit;
+				if (Tool->HitTest(FRay(FVector(Point.Place + Point.Normal * 10.0), FVector(-Point.Normal)), Hit) && FVector::Dist(Hit.ImpactPoint, FVector(Point.Place)) < 1.0)
+				{
+					Most = Point.Vertex;
+					MostShorter = Point.Shorter;
+					MostPlace = Point.Place;
+					MostNormal = Point.Normal;
+					break;
+				}
+			}
+			AddInfo(FString::Printf(TEXT("Of %d points, %d are more than 0.02 shorter than at rest, the most by %.4g. The most shortened one a ray can meet is point %d, %.4g shorter, at (%.3f, %.3f, %.3f)."),
+				Mesh ? Mesh->VertexCount() : 0, Shortened.Num(), Shortened.Num() > 0 ? Shortened[0].Shorter : 0.0, Most, MostShorter, MostPlace.X, MostPlace.Y, MostPlace.Z));
+
+			USculptBrushPackWrinkleMorphOpProps* WrinkleSettings = nullptr;
+			for (UObject* Object : Tool->GetToolProperties(/*bEnabledOnly*/ false))
+			{
+				if (USculptBrushPackOpProps* Settings = Cast<USculptBrushPackOpProps>(Object))
+				{
+					// Full weight to the brush's rim.
+					Settings->Falloff = 0.0f;
+				}
+				WrinkleSettings = WrinkleSettings ? WrinkleSettings : Cast<USculptBrushPackWrinkleMorphOpProps>(Object);
+			}
+			if (TestTrue(TEXT("Squashing the forearm shortens its surface by more than Wrinkle Morph's Starts At, at a point a ray can meet"), Most != INDEX_NONE && MostShorter > 0.02)
+				&& TestNotNull(TEXT("Wrinkle Morph's settings"), WrinkleSettings) && Lift)
+			{
+				auto DeltaOf = [Lift](int32 Vertex)
+				{
+					FVector3d Delta;
+					Lift->GetValue(Vertex, Delta);
+					return Delta;
+				};
+				auto ChangedPoints = [&](const TArray<FVector3d>& Before)
+				{
+					int32 Changed = 0;
+					for (const int32 Vertex : Mesh->VertexIndicesItr())
+					{
+						Changed += DeltaOf(Vertex) != Before[Vertex] ? 1 : 0;
+					}
+					return Changed;
+				};
+				auto AllDeltas = [&]()
+				{
+					TArray<FVector3d> Deltas;
+					Deltas.SetNum(Mesh->MaxVertexID());
+					for (const int32 Vertex : Mesh->VertexIndicesItr())
+					{
+						Deltas[Vertex] = DeltaOf(Vertex);
+					}
+					return Deltas;
+				};
+				// The stroke: the ray that was tried above.
+				const FRay Ray(FVector(MostPlace + MostNormal * 10.0), FVector(-MostNormal));
+				Tool->BrushProperties->BrushSize.SizeType = EBrushToolSizeType::World;
+				Tool->BrushProperties->BrushSize.WorldRadius = 4.0f;
+				auto Brush = [&](int32 Identifier)
+				{
+					Tool->SetActiveBrushType(Identifier);
+					Tool->Tick(0.03f);
+					return StrokeAlong(*Tool, Ray);
+				};
+				const double HalfHeight = 0.5 * WrinkleSettings->Height;
+
+				// Wrinkle Morph, only where compressed, whole at the shortening found: the most shortened point rises by
+				// the Height. A point is judged to have risen when its delta moved by more than half the Height.
+				WrinkleSettings->StartsAt = 0.0f;
+				WrinkleSettings->FullAt = static_cast<float>(MostShorter);
+				TArray<FVector3d> Before = AllDeltas();
+				TestTrue(TEXT("Wrinkle Morph on the squashed forearm: the stroke met the mesh"), Brush(BrushID::WrinkleMorph));
+				double Moved = UE::Geometry::Distance(DeltaOf(Most), Before[Most]);
+				AddInfo(FString::Printf(TEXT("Wrinkle Morph, only where compressed: the most shortened point's delta moved by %.4g; %d points changed."), Moved, ChangedPoints(Before)));
+				TestTrue(TEXT("Wrinkle Morph raises the most shortened point of the squashed forearm"), Moved > HalfHeight);
+
+				// The same with a real texture as the Wrinkle Map: white raises as no map does, black raises nothing.
+				auto MakeTexture = [](uint8 Value)
+				{
+					UTexture2D* Texture = UTexture2D::CreateTransient(4, 4, PF_B8G8R8A8);
+					Texture->SRGB = false;
+					TArray<uint8> Pixels;
+					Pixels.Init(Value, 4 * 4 * 4);
+					Texture->Source.Init(4, 4, 1, 1, TSF_BGRA8, Pixels.GetData());
+					return Texture;
+				};
+				WrinkleSettings->WrinkleMap = MakeTexture(255);
+				Before = AllDeltas();
+				TestTrue(TEXT("Wrinkle Morph with a white map: the stroke met the mesh"), Brush(BrushID::WrinkleMorph));
+				Moved = UE::Geometry::Distance(DeltaOf(Most), Before[Most]);
+				AddInfo(FString::Printf(TEXT("Wrinkle Morph with a white Wrinkle Map: the point's delta moved by %.4g."), Moved));
+				TestTrue(TEXT("With a white Wrinkle Map the point rises as without a map"), Moved > HalfHeight);
+
+				WrinkleSettings->WrinkleMap = MakeTexture(0);
+				Before = AllDeltas();
+				TestTrue(TEXT("Wrinkle Morph with a black map: the stroke met the mesh"), Brush(BrushID::WrinkleMorph));
+				Moved = UE::Geometry::Distance(DeltaOf(Most), Before[Most]);
+				AddInfo(FString::Printf(TEXT("Wrinkle Morph with a black Wrinkle Map: the point's delta moved by %.4g."), Moved));
+				TestTrue(TEXT("With a black Wrinkle Map nothing rises"), Moved < HalfHeight);
+				WrinkleSettings->WrinkleMap = nullptr;
+
+				// Mush Morph on the same place: on a joined surface in a pose it can measure, and it moves the point. How
+				// far is reported; that the delta is no longer what it was is what is judged.
+				Before = AllDeltas();
+				TestTrue(TEXT("Mush Morph on the squashed forearm: the stroke met the mesh"), Brush(BrushID::MushMorph));
+				Moved = UE::Geometry::Distance(DeltaOf(Most), Before[Most]);
+				const int32 Mushed = ChangedPoints(Before);
+				AddInfo(FString::Printf(TEXT("Mush Morph on the squashed forearm: the point's delta moved by %.4g; %d points changed."), Moved, Mushed));
+				TestTrue(TEXT("Mush Morph moves points of the squashed forearm"), Mushed > 0);
+				TestTrue(TEXT("and the most shortened point among them"), DeltaOf(Most) != Before[Most]);
+			}
+		}
+	}
+	CloseSession(*this, Session);
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSculptBrushPackMorphEditorTest, "SculptBrushPackMorph.Hook.SculptMorphTargetInSkeletalMeshEditor",

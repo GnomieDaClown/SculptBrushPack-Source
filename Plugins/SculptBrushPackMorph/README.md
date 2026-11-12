@@ -121,16 +121,22 @@ reads it through a class that derives from the tool and is never created (`FMorp
 - A test that makes a real stroke with each of the six brushes on that cube and reads the morph target back. Wrinkle Morph raises a corner with Only Where Compressed off, and with it on reports that
   nothing is compressed. Mush Morph reports that it cannot measure the cube's separate faces, and moves nothing.
 - A test that leaves Sculpt Morph Target on a morph brush and then starts the plain Sculpt tool, which does not have it.
+- A test of a real texture read as a Wrinkle Map: two by two texels, one of them white, read exactly and in the right
+  place.
+- A test on a posed mesh: the engine's tutorial character with its left forearm squashed to six tenths by scaling its
+  bone, which shortens that piece's surface by up to 0.4. Wrinkle Morph, only where compressed, raises the most
+  shortened point a ray can reach, the same with a white texture as its map, and nothing with a black one. Mush Morph
+  moves that point and the points around it.
 
 In the plugin's repository (https://github.com/GnomieDaClown/SculptBrushPack-Source), `pwsh -File Tools/BrushPack.ps1` builds both plugins in
 their host project and runs the tests headless.
 
 ## What is not covered
 
-- **Mush Morph and Wrinkle Morph have not been run on a posed mesh in the editor.** Their rules are tested on small
-  meshes written out by hand, and their strokes on a cube in its reference pose, where Mush Morph cannot act and
-  Wrinkle Morph finds no compression. Reading a real texture as a Wrinkle Map has not been run either: the tests give
-  the map's values directly.
+- **Mush Morph and Wrinkle Morph have not been run on a bent joint of a smoothly skinned mesh**, which is what they are
+  for: the engine ships no such mesh to test on. Its tutorial character is made of stiff pieces that share no points
+  across a joint, so the posed test squashes one piece by scaling its bone. What that test judges is that the brushes
+  act on a posed mesh through the tool, not that the result looks right. Nobody has tried them by hand.
 - The strokes in the tests are on a cube in its reference pose. Untested: a mesh with bones moved, a paused animation
   frame, part of the mesh isolated, the symmetry of a real character, pen pressure, a packaged build, engine versions
   other than 5.8.4.

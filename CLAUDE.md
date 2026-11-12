@@ -87,10 +87,10 @@ arguments: `-EngineRoot <folder>`, `-Step Build` or `-Step Test`, `-Filter Sculp
 
 ```
 Build (BrushPackHost58Editor Win64 Development): exit 0, 0 errors, 0 warnings, ... s
-Tests (SculptBrushPack): 24 passed, 0 failed, of 24; editor exit 0; ... s
+Tests (SculptBrushPack): 26 passed, 0 failed, of 26; editor exit 0; ... s
 ```
 
-Twenty-four tests: fifteen under `SculptBrushPack.` and nine under `SculptBrushPackMorph.`. Logs are in `Build/Logs`.
+Twenty-six tests: fifteen under `SculptBrushPack.` and eleven under `SculptBrushPackMorph.`. Logs are in `Build/Logs`.
 
 **Things that are not failures.**
 

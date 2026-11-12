@@ -535,13 +535,18 @@ void FWrinkleMorphBrushOp::BeginStroke(const FDynamicMesh3* Mesh, const FSculptB
 	{
 		MapTexture = Texture;
 		Map = FMapImage();
-		bHasMap = ReadMap ? ReadMap(Texture, Map) : Private::ReadMapWithEngine(Texture, Map);
+		bHasMap = ReadMap ? ReadMap(Texture, Map) : ReadTextureAsMap(Texture, Map);
 	}
 	if (Texture && !bHasMap)
 	{
 		bToldOfMap = true;
 		Context->ReportProblem(FText::Format(LOCTEXT("WrinkleMapUnreadable", "Wrinkle Morph could not read the texture {0} as a Wrinkle Map, so nothing is raised. Choose another texture or clear the map."), FText::FromString(Texture->GetName())));
 	}
+}
+
+bool FWrinkleMorphBrushOp::ReadTextureAsMap(UTexture2D* Texture, FMapImage& OutMap)
+{
+	return Private::ReadMapWithEngine(Texture, OutMap);
 }
 
 double FWrinkleMorphBrushOp::Compression(const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, int32 Vertex) const

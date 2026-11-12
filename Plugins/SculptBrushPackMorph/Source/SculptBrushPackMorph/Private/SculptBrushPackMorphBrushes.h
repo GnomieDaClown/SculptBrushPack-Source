@@ -520,9 +520,12 @@ namespace SculptBrushPackMorph
 		virtual void EndStroke(const FDynamicMesh3* Mesh, const FSculptBrushStamp& Stamp, const TArray<int32>& FinalVertices) override;
 
 		/**
-		 * How a texture is read into a map of one value per texel. Unset, the engine's reader is used and the red channel
-		 * taken; tests set one of their own.
+		 * Reads a texture into a map of one value per texel: the texture's red channel, read as the engine's sculpt tools
+		 * read a brush alpha. False when the texture cannot be read. Game thread.
 		 */
+		static bool ReadTextureAsMap(UTexture2D* Texture, FMapImage& OutMap);
+
+		/** How a texture is read into a map. Unset, ReadTextureAsMap is used; tests of the brush's rule set one of their own. */
 		TFunction<bool(UTexture2D*, FMapImage&)> ReadMap;
 
 	protected:

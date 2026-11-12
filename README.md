@@ -53,7 +53,7 @@ finished or stable. `5.9` is the released source ported to Unreal Engine 5.9.
    - Skeletal Mesh Editor, with its Editing Tools on: Deform palette, Sculpt; Morph palette, Sculpt Morph Target.
 
 Each plugin has automation tests, under the filters `SculptBrushPack` and `SculptBrushPackMorph` in the editor's Session
-Frontend: 24 in all.
+Frontend: 26 in all.
 
 ## Building and testing in this repository
 
