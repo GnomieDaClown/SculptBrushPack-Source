@@ -12,6 +12,9 @@ in Modeling Mode and in the Skeletal Mesh Editor.
 Each plugin's README says what every brush does, where it appears, how it gets into the engine's tool, how it is tested
 and what is not covered.
 
+**This is the `main` branch: the source for Unreal Engine 5.8.** The [`5.9`](https://github.com/GnomieDaClown/SculptBrushPack-Source/tree/5.9)
+branch holds the source for Unreal Engine 5.9.
+
 **This repository holds source only.** To use the plugins from here you compile them with your project. A packaged
 version with prebuilt binaries, which needs no compiling, is available from the author on request.
 
