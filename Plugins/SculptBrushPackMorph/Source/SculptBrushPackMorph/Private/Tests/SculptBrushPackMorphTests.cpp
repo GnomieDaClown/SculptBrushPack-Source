@@ -19,6 +19,7 @@
 #include "Editor.h"
 #include "EditorModeManager.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/Texture2D.h"
 #include "Framework/Commands/InputBindingManager.h"
 #include "Framework/Commands/UICommandList.h"
 #include "HAL/IConsoleManager.h"
@@ -60,6 +61,12 @@ namespace SculptBrushPackMorphTestLocals
 		TMap<FName, TArray<FVector3d>> SourceOffsets;
 		/** What the mesh's symmetry gives each vertex. Empty: nothing is known of the mesh's symmetry. */
 		TArray<TPair<EMorphMirror, FVector3d>> Mirrors;
+		/** The shown mesh's places with its pose taken off, by vertex. Empty: not known. */
+		TArray<FVector3d> Unposed;
+		/** The same without the edited morph. Empty: not known. */
+		TArray<FVector3d> UnposedWithout;
+		/** Places in the mesh's UV channel 0, by vertex. Empty: the mesh has no UVs. */
+		TArray<FVector2d> UVs;
 		/** The warning that stands for the user, empty when none does. */
 		FText Problem;
 
@@ -96,6 +103,25 @@ namespace SculptBrushPackMorphTestLocals
 			TArray<FName> Names;
 			SourceOffsets.GetKeys(Names);
 			return Names;
+		}
+		virtual bool GetUnposedPosition(int32 Vertex, bool bWithEditedMorph, FVector3d& OutPosition) const override
+		{
+			const TArray<FVector3d>& Places = bWithEditedMorph ? Unposed : UnposedWithout;
+			if (!Places.IsValidIndex(Vertex))
+			{
+				return false;
+			}
+			OutPosition = Places[Vertex];
+			return true;
+		}
+		virtual bool GetUV(int32 Vertex, int32 Channel, FVector2d& OutUV) const override
+		{
+			if (Channel != 0 || !UVs.IsValidIndex(Vertex))
+			{
+				return false;
+			}
+			OutUV = UVs[Vertex];
+			return true;
 		}
 	};
 
@@ -176,6 +202,50 @@ namespace SculptBrushPackMorphTestLocals
 			Mesh.AppendTriangle(0, 1 + (Corner + 1) % 7, 1 + Corner);
 		}
 		return Mesh;
+	}
+
+	/**
+	 * Four triangles around vertex 0 at Center: arms reach HalfX along X and 4 along Y, in the plane Z = 0. The middle's
+	 * four edges lie along the axes, so their lengths are whole numbers.
+	 */
+	static FDynamicMesh3 MakeCross(const FVector3d& Center, double HalfX)
+	{
+		const FVector3d Arms[4] = { FVector3d(HalfX, 0, 0), FVector3d(0, 4, 0), FVector3d(-HalfX, 0, 0), FVector3d(0, -4, 0) };
+		FDynamicMesh3 Mesh;
+		Mesh.AppendVertex(Center);
+		for (const FVector3d& Arm : Arms)
+		{
+			Mesh.AppendVertex(Arm);
+		}
+		for (int32 Corner = 0; Corner < 4; ++Corner)
+		{
+			Mesh.AppendTriangle(0, 1 + (Corner + 1) % 4, 1 + Corner);
+		}
+		return Mesh;
+	}
+
+	/** A mesh's places, by vertex ID. */
+	static TArray<FVector3d> PlacesOf(const FDynamicMesh3& Mesh)
+	{
+		TArray<FVector3d> Places;
+		Places.SetNum(Mesh.MaxVertexID());
+		for (const int32 Vertex : Mesh.VertexIndicesItr())
+		{
+			Places[Vertex] = Mesh.GetVertex(Vertex);
+		}
+		return Places;
+	}
+
+	/** The mesh turned a quarter turn about X, which takes (x, y, z) to (x, -z, y), and then moved by Offset. */
+	static FDynamicMesh3 TurnedAndMoved(const FDynamicMesh3& Mesh, const FVector3d& Offset)
+	{
+		FDynamicMesh3 Result = Mesh;
+		for (const int32 Vertex : Mesh.VertexIndicesItr())
+		{
+			const FVector3d Place = Mesh.GetVertex(Vertex);
+			Result.SetVertex(Vertex, FVector3d(Place.X, -Place.Z, Place.Y) + Offset);
+		}
+		return Result;
 	}
 
 	static bool TestPoint(FAutomationTestBase* Test, const FString& What, const FVector3d& Actual, const FVector3d& Expected)
@@ -440,6 +510,212 @@ bool FSculptBrushPackMorphMirrorTest::RunTest(const FString& Parameters)
 	Mirror.BeginStroke(&Shown, Stamp, {});
 	TestPoint(this, TEXT("Without partners nothing moves"), Apply(Mirror, Shown, Stamp)[1], FVector3d(-2, 0, 0));
 	TestTrue(TEXT("and the user is told that the points have no partner"), Context->Problem.ToString().Contains(TEXT("no partner")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSculptBrushPackMorphMushTest, "SculptBrushPackMorph.Brushes.MushMorph",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FSculptBrushPackMorphMushTest::RunTest(const FString& Parameters)
+{
+	using namespace SculptBrushPackMorphTestLocals;
+
+	// With its pose taken off, the model has a bump 8 high at the middle of a fan. One round of averaging leaves the
+	// middle at 8 / 8 = 1 and every rim point at 8 / 4 = 2, so the smoothed surface's normal at the middle points
+	// straight up, and the bump's detail is 8 - 1 = 7 along it. The direction across the surface looks toward rim point
+	// 1, which one round leaves at (6, 0, 2): along X.
+	const FDynamicMesh3 Rest = MakeFan(FVector3d(0, 0, 8));
+	const TSharedRef<FTestContext> Context = MakeShared<FTestContext>();
+	Context->Without = Rest;
+	Context->Unposed = PlacesOf(Rest);
+
+	FMushMorphBrushOp Mush(Context);
+	USculptBrushPackMushMorphOpProps* Settings = Prepare<FMushMorphBrushOp, USculptBrushPackMushMorphOpProps>(Mush);
+	TestEqual(TEXT("Mush Morph's Smoothing is 4 rounds"), Settings->Smoothing, 4);
+	TestEqual(TEXT("and its Strength 1"), Settings->Strength, 1.0f, 0.0f);
+	Settings->Smoothing = 1;
+	const FSculptBrushStamp Stamp = MakeStamp(FVector3d::Zero());
+
+	// A pose that only turns and moves the mesh leaves nothing to mend: the smoothed posed middle is the smoothed
+	// unposed middle turned and moved, (0, -1, 0) + (1, 2, 3), its normal is the unposed normal turned, (0, -1, 0), and
+	// the detail of 7 along it gives back the posed middle, (1, -6, 3).
+	const FDynamicMesh3 OnlyMoved = TurnedAndMoved(Rest, FVector3d(1, 2, 3));
+	Mush.BeginStroke(&OnlyMoved, Stamp, {});
+	TestPoint(this, TEXT("A mesh that is only turned and moved: the middle stays"), Apply(Mush, OnlyMoved, Stamp)[0], FVector3d(1, -6, 3));
+
+	// A pose that flattens the bump: the shown mesh is the fan with its middle at 0. The smoothed posed surface is the
+	// flat fan, and the detail of 7 is put back along its normal.
+	const FDynamicMesh3 Flattened = MakeFan(FVector3d(0, 0, 0));
+	Mush.BeginStroke(&Flattened, Stamp, {});
+	TestPoint(this, TEXT("A flattened bump: the middle gets its detail of 7 back"), Apply(Mush, Flattened, Stamp)[0], FVector3d(0, 0, 7));
+	TestPoint(this, TEXT("A second pass adds nothing"), Apply(Mush, Flattened, Stamp)[0], FVector3d(0, 0, 7));
+	TestTrue(TEXT("and nothing is reported"), Context->Problem.IsEmpty());
+
+	// Two rounds leave the unposed middle at (1 + 7 x 2) / 8 = 1.875, so the detail is 8 - 1.875 = 6.125.
+	Settings->Smoothing = 2;
+	Mush.BeginStroke(&Flattened, Stamp, {});
+	TestPoint(this, TEXT("Two rounds: the detail put back is 6.125"), Apply(Mush, Flattened, Stamp)[0], FVector3d(0, 0, 6.125));
+
+	// At half strength the point goes half the way.
+	Settings->Smoothing = 1;
+	FSculptBrushStamp Half = Stamp;
+	Half.Power = 0.5;
+	Mush.BeginStroke(&Flattened, Half, {});
+	TestPoint(this, TEXT("At half strength the middle goes half the way"), Apply(Mush, Flattened, Half)[0], FVector3d(0, 0, 3.5));
+
+	// Without the mesh's places in its reference pose nothing can be measured: nothing moves, and the user is told.
+	Context->Unposed.Reset();
+	Mush.BeginStroke(&Flattened, Stamp, {});
+	TestPoint(this, TEXT("Without the reference pose the middle stays"), Apply(Mush, Flattened, Stamp)[0], FVector3d(0, 0, 0));
+	TestTrue(TEXT("and the brush says it could not measure the surface"), Context->Problem.ToString().Contains(TEXT("could not measure")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSculptBrushPackMorphWrinkleTest, "SculptBrushPackMorph.Brushes.WrinkleMorph",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FSculptBrushPackMorphWrinkleTest::RunTest(const FString& Parameters)
+{
+	using namespace SculptBrushPackMorphTestLocals;
+
+	// At rest the middle's four edges are 4 long each: 16 in all. The pose pulls the two arms along X in to 3: 14 in all,
+	// which is an eighth shorter. The edited morph has raised the middle by a half.
+	const TSharedRef<FTestContext> Context = MakeShared<FTestContext>();
+	Context->Without = MakeCross(FVector3d(0, 0, 0), 3);
+	Context->UnposedWithout = PlacesOf(MakeCross(FVector3d(0, 0, 0), 4));
+	const FDynamicMesh3 Shown = MakeCross(FVector3d(0, 0, 0.5), 3);
+
+	FWrinkleMorphBrushOp Wrinkle(Context);
+	USculptBrushPackWrinkleMorphOpProps* Settings = Prepare<FWrinkleMorphBrushOp, USculptBrushPackWrinkleMorphOpProps>(Wrinkle);
+	TestEqual(TEXT("Wrinkle Morph's Height is 0.5"), Settings->Height, 0.5f, 0.0f);
+	TestTrue(TEXT("it raises only where the surface is compressed"), Settings->bOnlyWhereCompressed);
+	TestEqual(TEXT("from 0.02 shorter"), Settings->StartsAt, 0.02f, 0.0f);
+	TestEqual(TEXT("fully at 0.25 shorter"), Settings->FullAt, 0.25f, 0.0f);
+	TestNull(TEXT("it has no Wrinkle Map"), Settings->WrinkleMap.Get());
+	TestEqual(TEXT("and its Strength is 1"), Settings->Strength, 1.0f, 0.0f);
+
+	// An eighth shorter, with the wrinkle whole at a quarter: half of a Height of 2, along the normal, which is straight
+	// up, from the middle's place before the stroke.
+	const FSculptBrushStamp Stamp = MakeStamp(FVector3d::Zero());
+	Settings->Height = 2.0f;
+	Settings->StartsAt = 0.0f;
+	Settings->FullAt = 0.25f;
+	Wrinkle.BeginStroke(&Shown, Stamp, {});
+	TestPoint(this, TEXT("An eighth shorter, whole at a quarter: the middle rises by half the Height"), Apply(Wrinkle, Shown, Stamp)[0], FVector3d(0, 0, 1.5));
+	TestPoint(this, TEXT("A second pass adds nothing"), Apply(Wrinkle, Shown, Stamp)[0], FVector3d(0, 0, 1.5));
+	Wrinkle.EndStroke(&Shown, Stamp, {});
+	TestTrue(TEXT("and nothing is reported"), Context->Problem.IsEmpty());
+
+	// Starting at a sixteenth and whole at three sixteenths, an eighth is half the way.
+	Settings->StartsAt = 0.0625f;
+	Settings->FullAt = 0.1875f;
+	Wrinkle.BeginStroke(&Shown, Stamp, {});
+	TestPoint(this, TEXT("Half the way from Starts At to Full At: half the Height"), Apply(Wrinkle, Shown, Stamp)[0], FVector3d(0, 0, 1.5));
+
+	// Nothing rises until the surface is more than Starts At shorter.
+	Settings->StartsAt = 0.125f;
+	Settings->FullAt = 0.25f;
+	Wrinkle.BeginStroke(&Shown, Stamp, {});
+	TestPoint(this, TEXT("At Starts At exactly: the middle stays"), Apply(Wrinkle, Shown, Stamp)[0], FVector3d(0, 0, 0.5));
+
+	// With Ctrl the wrinkle is cut in; at half strength the point goes half the way.
+	Settings->StartsAt = 0.0f;
+	FSculptBrushStamp Inverted = Stamp;
+	Inverted.Direction = -1.0;
+	Wrinkle.BeginStroke(&Shown, Inverted, {});
+	TestPoint(this, TEXT("With Ctrl the middle is cut in by half the Height"), Apply(Wrinkle, Shown, Inverted)[0], FVector3d(0, 0, -0.5));
+	FSculptBrushStamp Half = Stamp;
+	Half.Power = 0.5;
+	Wrinkle.BeginStroke(&Shown, Half, {});
+	TestPoint(this, TEXT("At half strength the middle goes half the way"), Apply(Wrinkle, Shown, Half)[0], FVector3d(0, 0, 1.0));
+
+	// The brush's alpha shapes the wrinkle through each point's reach: an alpha of a quarter gives a quarter of the rise.
+	FSculptBrushStamp WithAlpha = Stamp;
+	WithAlpha.StampAlphaFunc = [](const FSculptBrushStamp&, const FVector3d&) { return 0.25; };
+	Wrinkle.BeginStroke(&Shown, WithAlpha, {});
+	TestPoint(this, TEXT("An alpha of a quarter: a quarter of the rise"), Apply(Wrinkle, Shown, WithAlpha)[0], FVector3d(0, 0, 0.75));
+
+	// A mesh that stands as at rest is nowhere compressed: nothing rises, and when the stroke ends the user is told.
+	const TSharedRef<FTestContext> AtRest = MakeShared<FTestContext>();
+	AtRest->Without = MakeCross(FVector3d(0, 0, 0), 4);
+	AtRest->UnposedWithout = PlacesOf(AtRest->Without);
+	const FDynamicMesh3 ShownAtRest = MakeCross(FVector3d(0, 0, 0.5), 4);
+	FWrinkleMorphBrushOp WrinkleAtRest(AtRest);
+	USculptBrushPackWrinkleMorphOpProps* AtRestSettings = Prepare<FWrinkleMorphBrushOp, USculptBrushPackWrinkleMorphOpProps>(WrinkleAtRest);
+	AtRestSettings->Height = 2.0f;
+	WrinkleAtRest.BeginStroke(&ShownAtRest, Stamp, {});
+	TestPoint(this, TEXT("At rest nothing is compressed: the middle stays"), Apply(WrinkleAtRest, ShownAtRest, Stamp)[0], FVector3d(0, 0, 0.5));
+	TestTrue(TEXT("Nothing is said while the stroke is under way"), AtRest->Problem.IsEmpty());
+	WrinkleAtRest.EndStroke(&ShownAtRest, Stamp, {});
+	TestTrue(TEXT("When it ends the brush says nothing was compressed"), AtRest->Problem.ToString().Contains(TEXT("Only Where Compressed")));
+
+	// With Only Where Compressed off the wrinkle rises everywhere, by the whole Height.
+	AtRestSettings->bOnlyWhereCompressed = false;
+	WrinkleAtRest.BeginStroke(&ShownAtRest, Stamp, {});
+	TestTrue(TEXT("A stroke that can act takes the report back"), AtRest->Problem.IsEmpty());
+	TestPoint(this, TEXT("Only Where Compressed off: the middle rises by the Height"), Apply(WrinkleAtRest, ShownAtRest, Stamp)[0], FVector3d(0, 0, 2.5));
+	WrinkleAtRest.EndStroke(&ShownAtRest, Stamp, {});
+	TestTrue(TEXT("and nothing is reported"), AtRest->Problem.IsEmpty());
+
+	// A Wrinkle Map of two by two texels, read at each point's place in the UVs. The test gives the map itself; the
+	// texture only says that there is one.
+	//   top row:    0.25  0.5
+	//   bottom row: 0.75  1
+	int32 TimesRead = 0;
+	WrinkleAtRest.ReadMap = [&TimesRead](UTexture2D*, FWrinkleMorphBrushOp::FMapImage& OutMap)
+	{
+		++TimesRead;
+		OutMap.SetDimensions(UE::Geometry::FImageDimensions(2, 2));
+		OutMap.SetPixel(0, 0, 0.25f);
+		OutMap.SetPixel(1, 0, 0.5f);
+		OutMap.SetPixel(0, 1, 0.75f);
+		OutMap.SetPixel(1, 1, 1.0f);
+		return true;
+	};
+	AtRestSettings->WrinkleMap = NewObject<UTexture2D>(GetTransientPackage());
+	// The middle sits at the center of the top right texel; the arms at the center of the top left.
+	AtRest->UVs.Init(FVector2d(0.25, 0.25), 5);
+	AtRest->UVs[0] = FVector2d(0.75, 0.25);
+	WrinkleAtRest.BeginStroke(&ShownAtRest, Stamp, {});
+	TArray<FVector3d> Mapped = Apply(WrinkleAtRest, ShownAtRest, Stamp);
+	TestPoint(this, TEXT("A map value of a half: the middle rises by half the Height"), Mapped[0], FVector3d(0, 0, 1.5));
+	TestPoint(this, TEXT("A map value of a quarter: an arm rises by a quarter of the Height"), Mapped[1], FVector3d(4, 0, 0.5));
+
+	// A map painted around mid grey: a half leaves the point, 1 raises it by the Height.
+	AtRestSettings->bMidGreyIsFlat = true;
+	WrinkleAtRest.BeginStroke(&ShownAtRest, Stamp, {});
+	TestPoint(this, TEXT("Mid Grey Is Flat: a half leaves the middle"), Apply(WrinkleAtRest, ShownAtRest, Stamp)[0], FVector3d(0, 0, 0.5));
+	AtRest->UVs[0] = FVector2d(0.75, 0.75);
+	WrinkleAtRest.BeginStroke(&ShownAtRest, Stamp, {});
+	TestPoint(this, TEXT("Mid Grey Is Flat: white raises the middle by the Height"), Apply(WrinkleAtRest, ShownAtRest, Stamp)[0], FVector3d(0, 0, 2.5));
+
+	// A tiling of 2 reads the map twice as fast: (0.375, 0.125) falls where (0.75, 0.25) fell.
+	AtRestSettings->bMidGreyIsFlat = false;
+	AtRestSettings->MapTiling = 2.0f;
+	AtRest->UVs[0] = FVector2d(0.375, 0.125);
+	WrinkleAtRest.BeginStroke(&ShownAtRest, Stamp, {});
+	TestPoint(this, TEXT("Map Tiling 2: the middle reads the top right texel"), Apply(WrinkleAtRest, ShownAtRest, Stamp)[0], FVector3d(0, 0, 1.5));
+	TestEqual(TEXT("The texture was read once for all these strokes"), TimesRead, 1);
+
+	// A mesh without UVs cannot place the map: nothing rises, and the user is told.
+	AtRest->UVs.Reset();
+	WrinkleAtRest.BeginStroke(&ShownAtRest, Stamp, {});
+	TestPoint(this, TEXT("Without UVs the middle stays"), Apply(WrinkleAtRest, ShownAtRest, Stamp)[0], FVector3d(0, 0, 0.5));
+	TestTrue(TEXT("and the brush says the mesh has no such UV channel"), AtRest->Problem.ToString().Contains(TEXT("UV channel")));
+
+	// A texture that cannot be read: nothing rises, and the user is told when the stroke begins.
+	const TSharedRef<FTestContext> Unreadable = MakeShared<FTestContext>();
+	Unreadable->Without = AtRest->Without;
+	Unreadable->UnposedWithout = AtRest->UnposedWithout;
+	Unreadable->UVs.Init(FVector2d(0.25, 0.25), 5);
+	FWrinkleMorphBrushOp WrinkleUnreadable(Unreadable);
+	USculptBrushPackWrinkleMorphOpProps* UnreadableSettings = Prepare<FWrinkleMorphBrushOp, USculptBrushPackWrinkleMorphOpProps>(WrinkleUnreadable);
+	UnreadableSettings->bOnlyWhereCompressed = false;
+	UnreadableSettings->WrinkleMap = NewObject<UTexture2D>(GetTransientPackage());
+	WrinkleUnreadable.ReadMap = [](UTexture2D*, FWrinkleMorphBrushOp::FMapImage&) { return false; };
+	WrinkleUnreadable.BeginStroke(&ShownAtRest, Stamp, {});
+	TestTrue(TEXT("A texture that cannot be read is reported as the stroke begins"), Unreadable->Problem.ToString().Contains(TEXT("could not read")));
+	TestPoint(this, TEXT("and the middle stays"), Apply(WrinkleUnreadable, ShownAtRest, Stamp)[0], FVector3d(0, 0, 0.5));
 	return true;
 }
 
@@ -724,7 +1000,7 @@ bool FSculptBrushPackMorphEditorTest::RunTest(const FString& Parameters)
 	FScopedCloneAndMirror CloneAndMirror(false);
 	TestTrue(TEXT("The plugin has its console variable for Clone Morph and Mirror Morph"), CloneAndMirror.IsFound());
 	TestFalse(TEXT("The variable is off unless asked for"), CloneAndMirror.IsOnByDefault());
-	TestTrue(TEXT("With it off the morph brushes are Amplify Morph and Smooth Morph"), GetBrushIdentifiers() == TArray<int32>({ BrushID::AmplifyMorph, BrushID::SmoothMorph }));
+	TestTrue(TEXT("With it off the morph brushes are Amplify, Smooth, Mush and Wrinkle Morph"), GetBrushIdentifiers() == TArray<int32>({ BrushID::AmplifyMorph, BrushID::SmoothMorph, BrushID::MushMorph, BrushID::WrinkleMorph }));
 
 	// PackLift moves every point 1 up.
 	FMorphToolSession Session;
@@ -786,6 +1062,34 @@ bool FSculptBrushPackMorphEditorTest::RunTest(const FString& Parameters)
 					}
 				}
 				TestEqual(TEXT("Every point knows the other morph's offset"), Known, Vertices.Num());
+
+				// What Mush Morph and Wrinkle Morph read: each point's place with the pose taken off, with and without
+				// the edited morph, and its place in the mesh's UVs. The cube stands in its reference pose, so the
+				// unposed place without the morph is the shown place without the morph, up to the rounding of the
+				// engine's skinning; the largest difference is reported, not judged. PackLift moves every point 1 up,
+				// which is what the edited morph adds to the unposed place.
+				int32 WithUV = 0;
+				int32 WithPlace = 0;
+				int32 LiftedByOne = 0;
+				double LargestUnposed = 0.0;
+				for (const int32 Vertex : Vertices)
+				{
+					FVector2d UV;
+					WithUV += Context->GetUV(Vertex, 0, UV) ? 1 : 0;
+					FVector3d WithMorph, WithoutMorph;
+					if (Context->GetUnposedPosition(Vertex, /*bWithEditedMorph*/ true, WithMorph) && Context->GetUnposedPosition(Vertex, /*bWithEditedMorph*/ false, WithoutMorph))
+					{
+						++WithPlace;
+						LiftedByOne += WithMorph - WithoutMorph == FVector3d(0, 0, 1) ? 1 : 0;
+						LargestUnposed = FMath::Max(LargestUnposed, (WithoutMorph - Without->GetVertex(Vertex)).GetAbsMax());
+					}
+				}
+				TestEqual(TEXT("Every point has a place in UV channel 0"), WithUV, Vertices.Num());
+				FVector2d NoUV;
+				TestFalse(TEXT("The cube has no UV channel 7"), Context->GetUV(Vertices[0], 7, NoUV));
+				TestEqual(TEXT("Every point's place with the pose taken off is known"), WithPlace, Vertices.Num());
+				TestEqual(TEXT("With the pose taken off, the edited morph adds its delta of 1 up to every point"), LiftedByOne, Vertices.Num());
+				AddInfo(FString::Printf(TEXT("The unposed place without the morph differs from the shown one by at most %.3g."), LargestUnposed));
 				AddInfo(FString::Printf(TEXT("%d points; the other morph's offset differs from (2, 0, 0) by at most %.3g."), Vertices.Num(), LargestSource));
 			}
 			Context->EndStroke();
@@ -793,7 +1097,7 @@ bool FSculptBrushPackMorphEditorTest::RunTest(const FString& Parameters)
 
 		// With the console variable on, a tool that starts gets Clone Morph and Mirror Morph as well.
 		CloneAndMirror.Set(true);
-		TestTrue(TEXT("With the variable on the morph brushes are four"), GetBrushIdentifiers() == TArray<int32>({ BrushID::AmplifyMorph, BrushID::SmoothMorph, BrushID::CloneMorph, BrushID::MirrorMorph }));
+		TestTrue(TEXT("With the variable on the morph brushes are six"), GetBrushIdentifiers() == TArray<int32>({ BrushID::AmplifyMorph, BrushID::SmoothMorph, BrushID::MushMorph, BrushID::WrinkleMorph, BrushID::CloneMorph, BrushID::MirrorMorph }));
 		if (RestartTool(*this, Session))
 		{
 			CheckPalette(*this, *Session.Tool, /*bExpectCloneAndMirror*/ true);
@@ -1024,6 +1328,57 @@ bool FSculptBrushPackMorphStrokesTest::RunTest(const FString& Parameters)
 			TestTrue(TEXT("Smooth Morph: the stroke met the mesh"), Brush(BrushID::SmoothMorph, RightBack));
 			AddInfo(TEXT("After Smooth Morph on the other +X corner:") + Describe(RightBack));
 			TestTrue(TEXT("Smooth Morph changes the brushed corner"), DeltasOf(RightBack) != Before);
+
+			// Wrinkle Morph with Only Where Compressed off: every point of the corner rises by the Height along its
+			// own face's normal. A point is judged to have risen when it moved by more than half the Height, and to
+			// have stayed when it moved by less: nearer to the one than to the other.
+			USculptBrushPackWrinkleMorphOpProps* WrinkleSettings = nullptr;
+			for (UObject* Object : Tool->GetToolProperties(/*bEnabledOnly*/ false))
+			{
+				WrinkleSettings = WrinkleSettings ? WrinkleSettings : Cast<USculptBrushPackWrinkleMorphOpProps>(Object);
+			}
+			if (TestNotNull(TEXT("Wrinkle Morph's settings"), WrinkleSettings))
+			{
+				const double HalfHeight = 0.5 * WrinkleSettings->Height;
+				auto LeastAndMostMoved = [&](const TArray<int32>& Vertices, const TArray<FVector3d>& From)
+				{
+					TPair<double, double> LeastAndMost(TNumericLimits<double>::Max(), 0.0);
+					for (int32 Index = 0; Index < Vertices.Num(); ++Index)
+					{
+						const double Moved = UE::Geometry::Distance(DeltaOf(Vertices[Index]), From[Index]);
+						LeastAndMost.Key = FMath::Min(LeastAndMost.Key, Moved);
+						LeastAndMost.Value = FMath::Max(LeastAndMost.Value, Moved);
+					}
+					return LeastAndMost;
+				};
+
+				WrinkleSettings->bOnlyWhereCompressed = false;
+				Before = DeltasOf(LeftFront);
+				TestTrue(TEXT("Wrinkle Morph: the stroke met the mesh"), Brush(BrushID::WrinkleMorph, LeftFront));
+				AddInfo(TEXT("After Wrinkle Morph on a corner, Only Where Compressed off:") + Describe(LeftFront));
+				TestTrue(TEXT("Wrinkle Morph raises every point of the brushed corner by its Height"), LeastAndMostMoved(LeftFront, Before).Key > HalfHeight);
+
+				// With Only Where Compressed on, on a mesh in its reference pose: nothing is compressed, nothing rises,
+				// and the brush says so once the stroke ends. The editor's tools context writes the warning to the log.
+				AddExpectedMessage(TEXT("Wrinkle Morph raises wrinkles where the posed surface is shorter than at rest"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
+				WrinkleSettings->bOnlyWhereCompressed = true;
+				Before = DeltasOf(LeftBack);
+				TestTrue(TEXT("Wrinkle Morph, only where compressed: the stroke met the mesh"), Brush(BrushID::WrinkleMorph, LeftBack));
+				TestTrue(TEXT("Wrinkle Morph raises nothing on a mesh in its reference pose"), LeastAndMostMoved(LeftBack, Before).Value < HalfHeight);
+
+				// Mush Morph on this cube cannot act, and says so. Each face of the cube is two triangles that share no
+				// point with the next face, and one round of averaging brings such a face's four points onto one line:
+				// the two on its diagonal meet at the face's middle, and the other two lie either side of it. A surface
+				// without area has no normal to measure the detail along. So the stroke goes through the tool, the
+				// brush reads the tool's mesh, reports that it could not measure the surface, and moves nothing. A stroke
+				// that mends a posed surface is tested by the brush's rule test, not here.
+				AddExpectedMessage(TEXT("Mush Morph could not measure the surface under the brush"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
+				Before = DeltasOf(RightFront);
+				TestTrue(TEXT("Mush Morph: the stroke met the mesh"), Brush(BrushID::MushMorph, RightFront));
+				const TPair<double, double> Mushed = LeastAndMostMoved(RightFront, Before);
+				AddInfo(FString::Printf(TEXT("After Mush Morph on a corner of the cube, its points moved by at most %.3g."), Mushed.Value));
+				TestTrue(TEXT("Mush Morph moves nothing where it cannot measure the surface"), Mushed.Value < HalfHeight);
+			}
 		}
 	}
 	CloseSession(*this, Session);

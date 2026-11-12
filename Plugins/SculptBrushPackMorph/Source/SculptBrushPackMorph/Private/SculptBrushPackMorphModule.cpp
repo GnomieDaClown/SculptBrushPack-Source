@@ -11,6 +11,7 @@
 #include "SculptBrushPackMorph.h"
 
 #include "DynamicMesh/DynamicMeshAttributeSet.h"
+#include "DynamicMesh/DynamicMeshOverlay.h"
 #include "DynamicSubmesh3.h"
 #include "HAL/IConsoleManager.h"
 #include "InteractiveToolManager.h"
@@ -40,6 +41,8 @@ namespace Private
 	using UE::Geometry::FDynamicMeshMorphTargetAttribute;
 	using UE::Geometry::FDynamicSubmesh3;
 	using UE::Geometry::FMatrix3d;
+	using UE::Geometry::FDynamicMeshUVOverlay;
+	using UE::Geometry::FIndex3i;
 	using UE::Geometry::FMeshPlanarSymmetry;
 
 	static const FName ProviderName(TEXT("SculptBrushPackMorph"));
@@ -47,7 +50,7 @@ namespace Private
 	// Clone Morph and Mirror Morph are left out of the brush palette unless this is on. It is read when a tool starts.
 	static TAutoConsoleVariable<bool> CVarCloneAndMirror(
 		TEXT("SculptBrushPackMorph.CloneAndMirror"), false,
-		TEXT("false: Sculpt Morph Target tools that start get Amplify Morph and Smooth Morph. true: they also get Clone Morph and Mirror Morph."));
+		TEXT("false: Sculpt Morph Target tools that start get Amplify Morph, Smooth Morph, Mush Morph and Wrinkle Morph. true: they also get Clone Morph and Mirror Morph."));
 
 	/**
 	 * The brushes' knowledge of the edited morph, read from the tool. One per tool, shared by its morph brushes.
@@ -76,6 +79,7 @@ namespace Private
 			Isolation = nullptr;
 			Edited = nullptr;
 			Symmetry = nullptr;
+			ActiveMorphs.Reset();
 			EditedWeight = 0.0;
 			BoneMatrices.Reset();
 			Linear.Reset();
@@ -119,6 +123,17 @@ namespace Private
 
 			ToolMesh = Mesh;
 			Edited = Attribute;
+			// The morph targets the shown mesh was posed with, each at its weight. The engine's posing adds weight x delta
+			// to a vertex's reference place for every weight it does not take for nothing, and then skins it
+			// (SkeletalMeshToolsHelper.cpp:165-177); the same weights are left out here.
+			for (const TPair<FName, float>& Pair : FMorphToolAccess::Weights(*MorphTool))
+			{
+				const FDynamicMeshMorphTargetAttribute* Active = FMath::IsNearlyZero(Pair.Value) ? nullptr : Mesh->Attributes()->GetMorphTargetAttribute(Pair.Key);
+				if (Active)
+				{
+					ActiveMorphs.Add({ Active, static_cast<double>(Pair.Value), Pair.Key == EditedName });
+				}
+			}
 			EditedWeight = *Weight;
 			BoneMatrices = SkeletalMeshToolsHelper::ComputeBoneMatrices(FMorphToolAccess::RefPose(*MorphTool), FMorphToolAccess::Pose(*MorphTool));
 			// With part of the mesh isolated the sculpt mesh numbers its vertices anew (MorphTargetVertexSculptTool.cpp:519-525).
@@ -137,6 +152,7 @@ namespace Private
 			Isolation = nullptr;
 			Edited = nullptr;
 			Symmetry = nullptr;
+			ActiveMorphs.Reset();
 		}
 
 		virtual bool IsToolSymmetryOn() const override
@@ -270,6 +286,58 @@ namespace Private
 			return EMorphMirror::None;
 		}
 
+		virtual bool GetUnposedPosition(int32 Vertex, bool bWithEditedMorph, FVector3d& OutPosition) const override
+		{
+			const int32 ToolVertex = ToToolMesh(Vertex);
+			if (!ToolMesh || !ToolMesh->IsVertex(ToolVertex))
+			{
+				return false;
+			}
+			// The tool's mesh stands in the reference pose without any morph target; the active ones are added as the
+			// engine's posing adds them, before it skins.
+			FVector3d Position = ToolMesh->GetVertex(ToolVertex);
+			for (const FActiveMorph& Morph : ActiveMorphs)
+			{
+				if (bWithEditedMorph || !Morph.bEdited)
+				{
+					FVector3d Delta;
+					Morph.Deltas->GetValue(ToolVertex, Delta);
+					Position += Delta * Morph.Weight;
+				}
+			}
+			OutPosition = Position;
+			return true;
+		}
+
+		virtual bool GetUV(int32 Vertex, int32 Channel, FVector2d& OutUV) const override
+		{
+			const int32 ToolVertex = ToToolMesh(Vertex);
+			if (!ToolMesh || !ToolMesh->IsVertex(ToolVertex) || !ToolMesh->HasAttributes() || Channel < 0 || Channel >= ToolMesh->Attributes()->NumUVLayers())
+			{
+				return false;
+			}
+			// A vertex has a place in the UVs for each triangle it is a corner of; the first found is given.
+			const FDynamicMeshUVOverlay* UVs = ToolMesh->Attributes()->GetUVLayer(Channel);
+			for (const int32 Triangle : ToolMesh->VtxTrianglesItr(ToolVertex))
+			{
+				if (!UVs->IsSetTriangle(Triangle))
+				{
+					continue;
+				}
+				const FIndex3i Corners = ToolMesh->GetTriangle(Triangle);
+				const FIndex3i Elements = UVs->GetTriangle(Triangle);
+				for (int32 Corner = 0; Corner < 3; ++Corner)
+				{
+					if (Corners[Corner] == ToolVertex)
+					{
+						OutUV = FVector2d(UVs->GetElement(Elements[Corner]));
+						return true;
+					}
+				}
+			}
+			return false;
+		}
+
 		virtual TArray<FName> GetSourceNames() const override
 		{
 			TArray<FName> Names;
@@ -397,6 +465,14 @@ namespace Private
 		const FDynamicSubmesh3* Isolation = nullptr;
 		const FDynamicMeshMorphTargetAttribute* Edited = nullptr;
 		const FMeshPlanarSymmetry* Symmetry = nullptr;
+		/** A morph target the shown mesh was posed with: its deltas in the tool's mesh, and its weight. */
+		struct FActiveMorph
+		{
+			const FDynamicMeshMorphTargetAttribute* Deltas = nullptr;
+			double Weight = 0.0;
+			bool bEdited = false;
+		};
+		TArray<FActiveMorph> ActiveMorphs;
 		double EditedWeight = 0.0;
 		TArray<FMatrix> BoneMatrices;
 		/** Per vertex of the sculpt mesh: what posing does to a delta there, where bHasLinear. */
@@ -451,6 +527,8 @@ namespace Private
 
 		OutBrushes.Add(MakeBrush<FAmplifyMorphBrushOp, USculptBrushPackAmplifyMorphOpProps>(BrushID::AmplifyMorph, LOCTEXT("AmplifyMorph", "AmplifyMorph"), Icons / TEXT("Sculpt_KelvinletScale.svg"), Context));
 		OutBrushes.Add(MakeBrush<FSmoothMorphBrushOp, USculptBrushPackSmoothMorphOpProps>(BrushID::SmoothMorph, LOCTEXT("SmoothMorph", "SmoothMorph"), Icons / TEXT("Rig_WeightSmooth.svg"), Context));
+		OutBrushes.Add(MakeBrush<FMushMorphBrushOp, USculptBrushPackMushMorphOpProps>(BrushID::MushMorph, LOCTEXT("MushMorph", "MushMorph"), Icons / TEXT("Rig_PoseBrush.svg"), Context));
+		OutBrushes.Add(MakeBrush<FWrinkleMorphBrushOp, USculptBrushPackWrinkleMorphOpProps>(BrushID::WrinkleMorph, LOCTEXT("WrinkleMorph", "WrinkleMorph"), Icons / TEXT("Deform_Wave.svg"), Context));
 		if (!CVarCloneAndMirror.GetValueOnGameThread())
 		{
 			return;
@@ -498,7 +576,7 @@ namespace Private
 
 TArray<int32> GetBrushIdentifiers()
 {
-	TArray<int32> Identifiers = { BrushID::AmplifyMorph, BrushID::SmoothMorph };
+	TArray<int32> Identifiers = { BrushID::AmplifyMorph, BrushID::SmoothMorph, BrushID::MushMorph, BrushID::WrinkleMorph };
 	if (Private::CVarCloneAndMirror.GetValueOnGameThread())
 	{
 		Identifiers.Append({ BrushID::CloneMorph, BrushID::MirrorMorph });

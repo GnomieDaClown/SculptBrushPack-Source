@@ -11,8 +11,8 @@ Repository: https://github.com/GnomieDaClown/SculptBrushPack-Source (public; the
   Unreal Engine 5.8, so they run without being compiled. The repository holds source only:
   - `Plugins/SculptBrushPack` adds eighteen brushes to the engine's Vertex Sculpt tools (Modeling Mode's Vertex Sculpt, the
     Skeletal Mesh Editor's Sculpt and Sculpt Morph Target).
-  - `Plugins/SculptBrushPackMorph` adds morph target brushes to Sculpt Morph Target: Amplify Morph and Smooth Morph. Two
-    more, Clone Morph and Mirror Morph, are in the code but out of the palette unless the console variable
+  - `Plugins/SculptBrushPackMorph` adds morph target brushes to Sculpt Morph Target: Amplify Morph, Smooth Morph, Mush Morph
+    and Wrinkle Morph. Two more, Clone Morph and Mirror Morph, are in the code but out of the palette unless the console variable
     `SculptBrushPackMorph.CloneAndMirror` is on. This plugin needs the first one and the engine's experimental plugin
     `SkeletalMeshMorphTargetEditingTools`, which its descriptor enables.
 - Written for **Unreal Engine 5.8**; built and tested on stock 5.8.4, Win64, MSVC. Nothing else has been tried.
@@ -87,10 +87,10 @@ arguments: `-EngineRoot <folder>`, `-Step Build` or `-Step Test`, `-Filter Sculp
 
 ```
 Build (BrushPackHost58Editor Win64 Development): exit 0, 0 errors, 0 warnings, ... s
-Tests (SculptBrushPack): 22 passed, 0 failed, of 22; editor exit 0; ... s
+Tests (SculptBrushPack): 24 passed, 0 failed, of 24; editor exit 0; ... s
 ```
 
-Twenty-two tests: fifteen under `SculptBrushPack.` and seven under `SculptBrushPackMorph.`. Logs are in `Build/Logs`.
+Twenty-four tests: fifteen under `SculptBrushPack.` and nine under `SculptBrushPackMorph.`. Logs are in `Build/Logs`.
 
 **Things that are not failures.**
 
@@ -139,7 +139,7 @@ Twenty-two tests: fifteen under `SculptBrushPack.` and seven under `SculptBrushP
   `Tools/Package.ps1 -BinariesFrom` takes from a project where the same commit was built and its tests passed.
 - **Nothing personal in the repository.** No local paths, user names or addresses of the person you work for in files,
   commit messages or release notes.
-- Identifiers of the pack's brushes are 2001 to 2018 and of the morph brushes 2101 to 2104. A brush that another module
+- Identifiers of the pack's brushes are 2001 to 2018 and of the morph brushes 2101 to 2106. A brush that another module
   hands the pack through `SculptBrushPack::AddBrushProvider` needs an identifier of 1000 or more that is not in use.
 
 ## Git, branches and releases

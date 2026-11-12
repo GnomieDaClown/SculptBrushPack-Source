@@ -7,7 +7,7 @@ in Modeling Mode and in the Skeletal Mesh Editor.
 | Plugin | What it adds |
 |---|---|
 | [`Plugins/SculptBrushPack`](Plugins/SculptBrushPack/README.md) | Eighteen brushes: Clay, Clay Strips, Crease, Blob, Dam Standard, Snake Hook, Move Topological, Layer, Fill, Scrape, Nudge, Thumb, TopoSlide, Relax, Glide, Tube, Noise and Sharpen. |
-| [`Plugins/SculptBrushPackMorph`](Plugins/SculptBrushPackMorph/README.md) | Two brushes for morph targets, in the Skeletal Mesh Editor's Sculpt Morph Target tool: Amplify Morph and Smooth Morph. It needs the first plugin and the engine's experimental morph target editing tools. |
+| [`Plugins/SculptBrushPackMorph`](Plugins/SculptBrushPackMorph/README.md) | Four brushes for morph targets, in the Skeletal Mesh Editor's Sculpt Morph Target tool: Amplify Morph, Smooth Morph, Mush Morph and Wrinkle Morph. It needs the first plugin and the engine's experimental morph target editing tools. |
 
 Each plugin's README says what every brush does, where it appears, how it gets into the engine's tool, how it is tested
 and what is not covered.
@@ -53,7 +53,7 @@ finished or stable. `5.9` is the released source ported to Unreal Engine 5.9.
    - Skeletal Mesh Editor, with its Editing Tools on: Deform palette, Sculpt; Morph palette, Sculpt Morph Target.
 
 Each plugin has automation tests, under the filters `SculptBrushPack` and `SculptBrushPackMorph` in the editor's Session
-Frontend: 22 in all.
+Frontend: 24 in all.
 
 ## Building and testing in this repository
 

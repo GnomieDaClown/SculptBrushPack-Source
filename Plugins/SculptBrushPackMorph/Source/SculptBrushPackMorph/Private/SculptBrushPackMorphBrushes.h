@@ -14,12 +14,15 @@
 
 #include "CoreMinimal.h"
 #include "DynamicMesh/DynamicMesh3.h"
+#include "Image/ImageBuilder.h"
 #include "Sculpting/MeshBrushOpBase.h"
 #include "SculptBrushPackSettings.h"
 
 #include <atomic>
 
 #include "SculptBrushPackMorphBrushes.generated.h"
+
+class UTexture2D;
 
 namespace SculptBrushPackMorph
 {
@@ -30,6 +33,8 @@ namespace SculptBrushPackMorph
 		inline constexpr int32 SmoothMorph = 2102;
 		inline constexpr int32 CloneMorph = 2103;
 		inline constexpr int32 MirrorMorph = 2104;
+		inline constexpr int32 MushMorph = 2105;
+		inline constexpr int32 WrinkleMorph = 2106;
 	}
 
 	/** What the mesh's symmetry gives the mirror brush for one vertex. The symmetry plane is X = 0 in the reference pose. */
@@ -51,8 +56,9 @@ namespace SculptBrushPackMorph
 	 * tests implement it by hand.
 	 *
 	 * Threading: a brush calls BeginStroke, EndStroke, GetMeshWithoutMorph, PrepareVertices, GetSourceNames,
-	 * IsToolSymmetryOn and ReportProblem from the game thread only. GetSourceOffset and GetMirroredOffset are called from worker threads, for the vertices of the
-	 * last PrepareVertices call, and must not change the context.
+	 * GetUnposedPosition, GetUV, IsToolSymmetryOn and ReportProblem from the game thread only. GetSourceOffset and
+	 * GetMirroredOffset are called from worker threads, for the vertices of the last PrepareVertices call, and must not
+	 * change the context.
 	 */
 	class IMorphBrushContext
 	{
@@ -87,6 +93,19 @@ namespace SculptBrushPackMorph
 
 		/** The other morph targets of the mesh, which a brush can take a shape from. */
 		virtual TArray<FName> GetSourceNames() const = 0;
+
+		/**
+		 * A vertex's place in the mesh's reference pose, with the morph targets at the weights the shown mesh has: the
+		 * shown mesh with its pose taken off. With bWithEditedMorph false, the edited morph is left out as well, which is
+		 * GetMeshWithoutMorph's mesh with its pose taken off. As the mesh was when the stroke began. False when not known.
+		 */
+		virtual bool GetUnposedPosition(int32 Vertex, bool bWithEditedMorph, FVector3d& OutPosition) const { return false; }
+
+		/**
+		 * A vertex's place in one of the mesh's UV channels. A vertex on a UV seam has several; one of them is given. False
+		 * when the mesh has no such channel or the vertex no place in it.
+		 */
+		virtual bool GetUV(int32 Vertex, int32 Channel, FVector2d& OutUV) const { return false; }
 
 		/**
 		 * Whether the tool's own Symmetry setting is in force. With it on, the tool moves every stamp to the +X side and
@@ -195,10 +214,84 @@ public:
 	ESculptBrushPackMirrorSource CopyFrom = ESculptBrushPackMirrorSource::OtherSide;
 };
 
+UCLASS()
+class USculptBrushPackMushMorphOpProps : public USculptBrushPackOpProps
+{
+	GENERATED_BODY()
+public:
+	USculptBrushPackMushMorphOpProps();
+
+	/**
+	 * How broadly the surface is evened out: the number of times each point is averaged with its neighbors before the
+	 * model's detail is put back. Few rounds mend small pinches; more rounds mend a whole collapsed joint. Read when a
+	 * stroke begins.
+	 */
+	UPROPERTY(EditAnywhere, Category = MushMorph, meta = (DisplayName = "Smoothing", UIMin = "1", UIMax = "8", ClampMin = "1", ClampMax = "16"))
+	int32 Smoothing = 4;
+};
+
+UCLASS()
+class USculptBrushPackWrinkleMorphOpProps : public USculptBrushPackOpProps
+{
+	GENERATED_BODY()
+public:
+	USculptBrushPackWrinkleMorphOpProps();
+
+	/**
+	 * The wrinkle's height where it is whole, in the units the tool works in: world units (centimeters) for a mesh that
+	 * is not scaled. With Ctrl the wrinkle is cut in instead of raised.
+	 */
+	UPROPERTY(EditAnywhere, Category = WrinkleMorph, meta = (DisplayName = "Height", UIMin = "0.0", UIMax = "5.0", ClampMin = "0.0"))
+	float Height = 0.5f;
+
+	/**
+	 * On: wrinkles rise only where the posed surface is shorter than at rest, as skin bunches up on the inside of a
+	 * bend, and by how much shorter. Off: they rise everywhere the brush goes, which is the way to use the brush on a
+	 * mesh in its reference pose.
+	 */
+	UPROPERTY(EditAnywhere, Category = WrinkleMorph, meta = (DisplayName = "Only Where Compressed"))
+	bool bOnlyWhereCompressed = true;
+
+	/**
+	 * How much shorter than at rest the surface around a point must be before anything rises there: 0.02 is two
+	 * hundredths shorter. It keeps the brush off surface that is as good as at rest.
+	 */
+	UPROPERTY(EditAnywhere, Category = WrinkleMorph, meta = (DisplayName = "Starts At", UIMin = "0.0", UIMax = "0.5", ClampMin = "0.0", ClampMax = "1.0", EditCondition = "bOnlyWhereCompressed"))
+	float StartsAt = 0.02f;
+
+	/** How much shorter than at rest the surface around a point is where the wrinkle is whole: 0.25 is a quarter shorter. */
+	UPROPERTY(EditAnywhere, Category = WrinkleMorph, meta = (DisplayName = "Full At", UIMin = "0.01", UIMax = "1.0", ClampMin = "0.0", ClampMax = "1.0", EditCondition = "bOnlyWhereCompressed"))
+	float FullAt = 0.25f;
+
+	/**
+	 * A texture that gives the wrinkles their pattern: it is read at each point's place in the mesh's UVs, and its red
+	 * channel is the share of Height the point rises by. Black leaves the point, white raises it fully. Without a map the
+	 * rise is even, and the brush's alpha alone gives it a pattern. The texture is read when the brush is first used
+	 * with it; pick the brush again after changing the texture's pixels.
+	 */
+	UPROPERTY(EditAnywhere, Category = WrinkleMorph, meta = (DisplayName = "Wrinkle Map"))
+	TObjectPtr<UTexture2D> WrinkleMap = nullptr;
+
+	/**
+	 * For a map painted around mid grey, as displacement maps are: mid grey leaves the point, white raises it by Height
+	 * and black lowers it by Height.
+	 */
+	UPROPERTY(EditAnywhere, Category = WrinkleMorph, meta = (DisplayName = "Mid Grey Is Flat", EditCondition = "WrinkleMap != nullptr"))
+	bool bMidGreyIsFlat = false;
+
+	/** How many times the map repeats across the mesh's UVs. */
+	UPROPERTY(EditAnywhere, Category = WrinkleMorph, meta = (DisplayName = "Map Tiling", UIMin = "0.25", UIMax = "16.0", ClampMin = "0.01", EditCondition = "WrinkleMap != nullptr"))
+	float MapTiling = 1.0f;
+
+	/** The UV channel of the mesh the map is read with. */
+	UPROPERTY(EditAnywhere, Category = WrinkleMorph, meta = (DisplayName = "UV Channel", UIMin = "0", UIMax = "7", ClampMin = "0", ClampMax = "7", EditCondition = "WrinkleMap != nullptr"))
+	int32 UVChannel = 0;
+};
+
 namespace SculptBrushPackMorph
 {
 	/**
-	 * What the four brushes share. As with the Sculpt Brush Pack's Tube, Noise and Sharpen, a stroke's result depends on
+	 * What the brushes share. As with the Sculpt Brush Pack's Tube, Noise and Sharpen, a stroke's result depends on
 	 * where the brush went and how hard, not on how long it stayed: each point keeps its reach for the stroke, the largest
 	 * falloff x strength any stamp has given it, and stands that share of the way from its place before the stroke to the
 	 * brush's target for it. A second pass adds nothing and a lighter pass takes nothing back. The target is worked out
@@ -347,5 +440,119 @@ namespace SculptBrushPackMorph
 		/** How many of the stroke's points the mesh's symmetry had something for. Counted from worker threads. */
 		mutable std::atomic<int32> PointsWithMirror{ 0 };
 		bool bToldOfNoPartner = false;
+	};
+
+	/**
+	 * Mush Morph. A corrective for what skinning does to the surface in a pose. At full reach a point stands where the
+	 * smoothed posed surface, with the model's detail put back on it, would have it. Both the shown mesh and the same
+	 * mesh with its pose taken off are smoothed by Smoothing rounds of averaging, as Smooth Morph averages. A point's
+	 * detail is its unposed place less its smoothed unposed place, measured along the smoothed unposed surface's own
+	 * directions there: its normal and two directions across it. It is put back along the same directions of the smoothed
+	 * posed surface. So a pinched elbow or a collapsed shoulder is evened out and the model's own detail stays. Where the
+	 * mesh stands as in its reference pose the two shapes are one, and the point stays where it is. This is the delta
+	 * mush technique (Mancewicz, Derksen, Rijpkema and Wilson, 2014), painted into the morph target with a brush.
+	 */
+	class FMushMorphBrushOp : public FMorphBrushOp
+	{
+	public:
+		using FMorphBrushOp::FMorphBrushOp;
+		virtual void BeginStroke(const FDynamicMesh3* Mesh, const FSculptBrushStamp& Stamp, const TArray<int32>& InitialVertices) override;
+
+	protected:
+		virtual void PrepareStamp(const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices) override;
+		virtual FVector3d FullTarget(const FSculptBrushStamp& Stamp, int32 Vertex, const FVector3d& Before, const FVector3d& Base) const override;
+
+	private:
+		/** The two shapes that are smoothed: the mesh as shown, and the same mesh with its pose taken off. */
+		enum EShape : int32
+		{
+			Posed = 0,
+			Unposed = 1,
+		};
+
+		/** A shape's places after each round of averaging, for the points worked out so far in this stroke. */
+		struct FSmoothedShape
+		{
+			/** Places[r] holds the places after r + 1 rounds. */
+			TArray<TMap<int32, FVector3d>> Places;
+			/** Unknown[r] holds the points whose place after r + 1 rounds cannot be known. */
+			TArray<TSet<int32>> Unknown;
+		};
+
+		/** A point's place in a shape after Round rounds of averaging. False when it cannot be known. Game thread only. */
+		bool Place(const FDynamicMesh3& Mesh, EShape Shape, int32 Vertex, int32 Round, FVector3d& OutPlace);
+		/**
+		 * The smoothed surface's directions at a point: OutAxes[2] its normal, OutAxes[0] the direction across it toward
+		 * the neighbor InOutToward (chosen here when INDEX_NONE), OutAxes[1] square to both. False where they cannot be told.
+		 */
+		bool Directions(const FDynamicMesh3& Mesh, EShape Shape, int32 Vertex, int32& InOutToward, FVector3d& OutPlace, FVector3d OutAxes[3]);
+
+		int32 RoundCount = 0;
+		FSmoothedShape Shapes[2];
+		/** Where each point worked out so far stands at full reach. */
+		TMap<int32, FVector3d> Mushed;
+		/** The points worked out so far for which no such place could be told; they stay where they are. */
+		TSet<int32> Unmushed;
+		bool bToldOfUnmushed = false;
+	};
+
+	/**
+	 * Wrinkle Morph. Raises wrinkles where skin bunches up in a pose. At full reach a point rises along the surface's
+	 * normal by Height times its compression times its pattern.
+	 *
+	 * Compression is how much shorter the edges around the point are in the pose than at rest: the lengths of its edges in
+	 * the shown mesh without the edited morph, summed, against the same sum with the pose taken off. Nothing below Starts
+	 * At, all of it from Full At. With Only Where Compressed off it is 1 everywhere.
+	 *
+	 * The pattern is the Wrinkle Map read at the point's place in the mesh's UVs, where there is a map, and 1 where there
+	 * is none. The brush's alpha shapes the wrinkles as it shapes any stroke of these brushes: through each point's reach.
+	 *
+	 * The rise is measured from the point's place before the stroke, so a stroke adds to what is there. With Ctrl the
+	 * wrinkle is cut in. A stroke that found nothing compressed under it says so when it ends.
+	 */
+	class FWrinkleMorphBrushOp : public FMorphBrushOp
+	{
+	public:
+		using FMorphBrushOp::FMorphBrushOp;
+		using FMapImage = UE::Geometry::TImageBuilder<float>;
+
+		virtual void BeginStroke(const FDynamicMesh3* Mesh, const FSculptBrushStamp& Stamp, const TArray<int32>& InitialVertices) override;
+		virtual void EndStroke(const FDynamicMesh3* Mesh, const FSculptBrushStamp& Stamp, const TArray<int32>& FinalVertices) override;
+
+		/**
+		 * How a texture is read into a map of one value per texel. Unset, the engine's reader is used and the red channel
+		 * taken; tests set one of their own.
+		 */
+		TFunction<bool(UTexture2D*, FMapImage&)> ReadMap;
+
+	protected:
+		virtual void PrepareStamp(const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices) override;
+		virtual FVector3d FullTarget(const FSculptBrushStamp& Stamp, int32 Vertex, const FVector3d& Before, const FVector3d& Base) const override;
+
+	private:
+		/**
+		 * The share of the wrinkle a point's compression gives it, from 0 to 1. Mesh gives the point's neighbors, Without
+		 * their places.
+		 */
+		double Compression(const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, int32 Vertex) const;
+
+		double Height = 0.0;
+		bool bOnlyWhereCompressed = true;
+		double StartsAt = 0.0;
+		double FullAt = 0.0;
+		bool bMidGreyIsFlat = false;
+		double MapTiling = 1.0;
+		int32 UVChannel = 0;
+
+		/** The map as read, kept while the brush is active and the same texture is set. */
+		FMapImage Map;
+		TWeakObjectPtr<UTexture2D> MapTexture;
+		bool bHasMap = false;
+
+		/** How far each point worked out so far rises at full reach, as a vector. */
+		TMap<int32, FVector3d> Rise;
+		int32 PointsSeen = 0;
+		int32 PointsCompressed = 0;
+		bool bToldOfMap = false;
 	};
 }

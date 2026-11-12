@@ -1,8 +1,9 @@
 # Sculpt Brush Pack: Morph Targets
 
-An editor plugin for Unreal Engine 5.8 that adds two brushes for editing morph targets to the Skeletal Mesh Editor's
+An editor plugin for Unreal Engine 5.8 that adds four brushes for editing morph targets to the Skeletal Mesh Editor's
 Sculpt Morph Target tool. Where an ordinary sculpt brush moves the surface, these work on what the morph target adds to
-it: one strengthens it, the other smooths it. Two more brushes, which copy it from another morph target and mirror it
+it: one strengthens it, one smooths it, and two are for correctives sculpted in a pose, mending what skinning does to
+the surface and raising wrinkles where it bunches up. Two more brushes, which copy it from another morph target and mirror it
 across the mesh, are in the plugin but out of the palette for now; see "Clone Morph and Mirror Morph" below.
 
 It needs the Sculpt Brush Pack (`SculptBrushPack`) and the engine's experimental plugin "Skeletal Mesh Morph Target
@@ -21,7 +22,7 @@ tools with it.
 2. In the Morph Targets tab, pick the morph target to edit with its radio button, and give it a weight above 0. The tool
    drops any stroke made while the edited morph target's weight is 0.
 3. In the Morph palette, start Sculpt Morph Target.
-4. The two brushes are the last in the brush palette, after the engine's and the Sculpt Brush Pack's.
+4. The four brushes are the last in the brush palette, after the engine's and the Sculpt Brush Pack's.
 
 They share one rule: the result of a stroke depends on where the brush went and how hard, not on how long it stayed.
 A second pass over the same place adds nothing, and a lighter pass takes nothing back.
@@ -30,8 +31,36 @@ A second pass over the same place adds nothing, and a lighter pass takes nothing
 |---|---|---|
 | AmplifyMorph | Makes the morph stronger where you brush. | Brush the area. **Amount** sets how much stronger at full reach: 0.5 is half again as strong. Hold Ctrl to make it weaker instead; it stops at nothing and never turns the shape over. |
 | SmoothMorph | Smooths what the morph adds, and leaves the model's own detail alone. | Brush a hard edge of the morph to soften it. **Smoothing** sets how broadly it smooths. |
+| MushMorph | Mends what skinning does to the surface in a pose: a pinched elbow, a collapsed shoulder. The surface is evened out and the model's own detail is kept. | Pose the mesh, then brush the joint that looks wrong. **Smoothing** sets how broadly the surface is evened out: few rounds for a small pinch, more for a whole joint. On a mesh in its reference pose there is nothing to mend and the brush leaves it alone. |
+| WrinkleMorph | Raises wrinkles where the posed surface bunches up, as on the inside of a bend. | Pose the mesh, then brush where the skin compresses. **Height** is the wrinkle's height; hold Ctrl to cut it in. See "Wrinkle Morph's pattern" below for maps and alphas. |
 
 When the edited morph target's weight is 0 a stroke cannot act, and the tool's panel shows a warning that says so.
+
+### Wrinkle Morph's pattern
+
+How much a point rises is its **compression** times its **pattern**, times Height.
+
+- **Compression.** With **Only Where Compressed** on, a point rises by how much shorter the surface around it is in the
+  pose than at rest: nothing until it is **Starts At** shorter, fully from **Full At**. Turn it off to raise wrinkles
+  everywhere the brush goes, which is also how to use the brush on a mesh in its reference pose. If a stroke finds
+  nothing compressed under it, the tool's panel says so when the stroke ends.
+- **Wrinkle Map.** A texture read at each point's place in the mesh's UVs: its red channel is the share of Height the
+  point rises by, so black leaves the point and white raises it fully. **Mid Grey Is Flat** is for maps painted around
+  mid grey, as displacement maps are: white raises, black lowers. **Map Tiling** repeats the map, and **UV Channel**
+  picks the UVs it is read with. The texture is read when the brush is first used with it; pick the brush again after
+  changing the texture's pixels. A normal map is not a height map and will not give the wrinkles it draws.
+- **The brush's alpha.** The tool's own Alpha shapes the wrinkles as it shapes any stroke of these brushes: where the
+  alpha is dark, less rises. As a stroke keeps the most each point has been given, a dragged stroke fills the alpha's
+  gaps in; to stamp an alpha's pattern, click once or use the Dots stroke type.
+- Without a map the rise is even, and compression and the alpha alone shape it.
+
+The mesh needs enough points to show a wrinkle: a brush moves the points there are, and adds none.
+
+### What Mush Morph cannot do
+
+It needs a surface around each point: several triangles joined at their corners. Where the mesh is cut into separate
+flat pieces of two triangles, as a cube with hard edges is, there is nothing to even out and the brush says it could
+not measure the surface.
 
 ## Clone Morph and Mirror Morph
 
@@ -82,13 +111,17 @@ reads it through a class that derives from the tool and is never created (`FMorp
 
 `Private/Tests/SculptBrushPackMorphTests.cpp`, under the automation filter `SculptBrushPackMorph`:
 
-- Four tests of the brushes' rules, compared exactly with values worked out by hand, including the warnings.
+- Six tests of the brushes' rules, compared exactly with values worked out by hand, including the warnings. Mush
+  Morph's: a mesh that the pose only turns and moves is left as it is, and a bump the pose flattened gets its detail
+  back. Wrinkle Morph's: the compression, a map read at texel centers, mid grey, tiling, an alpha, and Ctrl.
 - A test that opens the Skeletal Mesh Editor on a copy of the engine's skeletal cube with two morph targets, starts
   Sculpt Morph Target and checks the palette and what the brushes read from the tool. The palette is checked three
-  times: as the plugin is set (two morph brushes), with the console variable on (four), and with it off again after a
-  tool was left on MirrorMorph (two, and the tool starts on the engine's Move).
-- A test that makes a real stroke with each of the four brushes on that cube, with the console variable on, and reads
-  the morph target back.
+  times: as the plugin is set (four morph brushes), with the console variable on (six), and with it off again after a
+  tool was left on MirrorMorph (four, and the tool starts on the engine's Move). It also checks that the tool gives
+  every point its place with the pose taken off and its place in the UVs.
+- A test that makes a real stroke with each of the six brushes on that cube, with the console variable on, and reads
+  the morph target back. Wrinkle Morph raises a corner with Only Where Compressed off, and with it on reports that
+  nothing is compressed. Mush Morph reports that it cannot measure the cube's separate faces, and moves nothing.
 - A test that leaves Sculpt Morph Target on a morph brush and then starts the plain Sculpt tool, which does not have it.
 
 In the plugin's repository (https://github.com/GnomieDaClown/SculptBrushPack-Source), `pwsh -File Tools/BrushPack.ps1` builds both plugins in
@@ -96,6 +129,10 @@ their host project and runs the tests headless.
 
 ## What is not covered
 
+- **Mush Morph and Wrinkle Morph have not been run on a posed mesh in the editor.** Their rules are tested on small
+  meshes written out by hand, and their strokes on a cube in its reference pose, where Mush Morph cannot act and
+  Wrinkle Morph finds no compression. Reading a real texture as a Wrinkle Map has not been run either: the tests give
+  the map's values directly.
 - The strokes in the tests are on a cube in its reference pose. Untested: a mesh with bones moved, a paused animation
   frame, part of the mesh isolated, the symmetry of a real character, pen pressure, a packaged build, engine versions
   other than 5.8.4.
