@@ -9,6 +9,7 @@
 #include "Async/ParallelFor.h"
 #include "Engine/Texture2D.h"
 #include "IndexTypes.h"
+#include "Math/RandomStream.h"
 #include "VectorUtil.h"
 
 #define LOCTEXT_NAMESPACE "SculptBrushPackMorph"
@@ -21,6 +22,16 @@ namespace Private
 {
 	// Smooth Morph's most rounds: a stroke keeps one offset per vertex of the mesh and round.
 	constexpr int32 MaxSmoothingRounds = 16;
+
+	// Nu Wrinkle's most rounds of softening its compression.
+	constexpr int32 MaxSoftenRounds = 8;
+
+	// How fast a reach that builds up grows: the engine's own speed for a stamp (BrushSpeedTuning, MeshSculptBrushOps.h:39
+	// in 5.8.4), so that a brush that builds up does so at the pace of the engine's own.
+	constexpr double BuildUpSpeed = 6.0;
+
+	// The rounds of multiplying by which the way the surface is squeezed is found from its shortened edges.
+	constexpr int32 SqueezeRounds = 32;
 
 	/** The tool's falloff at Position, times its alpha when it has one. */
 	static double EvaluateWeight(const FMeshSculptBrushOp& Op, const FSculptBrushStamp& Stamp, const FVector3d& Position)
@@ -95,18 +106,21 @@ void FMorphBrushOp::ApplyStamp(const FDynamicMesh3* Mesh, const FSculptBrushStam
 	{
 		Context->PrepareVertices(Vertices);
 	}
-	PrepareStamp(*Mesh, *Without, Vertices);
+	PrepareStamp(Stamp, *Mesh, *Without, Vertices);
+	const bool bBuildsUp = BuildsUp();
 
 	// The tool lists each vertex once, so each k reads and writes entries of its own.
 	ParallelFor(Vertices.Num(), [&](int32 k)
 	{
 		const int32 Vertex = Vertices[k];
 		const FVector3d Before = Mesh->GetVertex(Vertex);
-		Reach[Vertex] = FMath::Max(Reach[Vertex], Private::EvaluateWeight(*this, Stamp, Before) * Stamp.Power);
+		const double Given = Private::EvaluateWeight(*this, Stamp, Before) * Stamp.Power;
+		Reach[Vertex] = bBuildsUp ? FMath::Min(1.0, Reach[Vertex] + Given * Stamp.DeltaTime * Private::BuildUpSpeed) : FMath::Max(Reach[Vertex], Given);
 		if (!bHasTarget[Vertex])
 		{
-			Targets[Vertex] = Without->IsVertex(Vertex) ? FullTarget(Stamp, Vertex, Before, Without->GetVertex(Vertex)) : Before;
-			bHasTarget[Vertex] = true;
+			const bool bHasBase = Without->IsVertex(Vertex);
+			Targets[Vertex] = bHasBase ? FullTarget(Stamp, Vertex, Before, Without->GetVertex(Vertex)) : Before;
+			bHasTarget[Vertex] = !bHasBase || IsTargetFinal(Vertex);
 		}
 		NewPositionsOut[k] = Before + (Targets[Vertex] - Before) * Reach[Vertex];
 	});
@@ -128,7 +142,7 @@ void FMorphBrushOp::CancelStroke()
 	}
 }
 
-void FAmplifyMorphBrushOp::PrepareStamp(const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices)
+void FAmplifyMorphBrushOp::PrepareStamp(const FSculptBrushStamp& Stamp, const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices)
 {
 	Amount = GetPropertySetAs<USculptBrushPackAmplifyMorphOpProps>()->Amount;
 }
@@ -189,7 +203,7 @@ FVector3d FSmoothMorphBrushOp::Averaged(const FDynamicMesh3& Mesh, const FDynami
 	return Round.Offsets[Vertex];
 }
 
-void FSmoothMorphBrushOp::PrepareStamp(const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices)
+void FSmoothMorphBrushOp::PrepareStamp(const FSculptBrushStamp& Stamp, const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices)
 {
 	if (Rounds.IsEmpty())
 	{
@@ -248,7 +262,7 @@ void FCloneMorphBrushOp::BeginStroke(const FDynamicMesh3* Mesh, const FSculptBru
 	}
 }
 
-void FCloneMorphBrushOp::PrepareStamp(const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices)
+void FCloneMorphBrushOp::PrepareStamp(const FSculptBrushStamp& Stamp, const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices)
 {
 	const USculptBrushPackCloneMorphOpProps* Props = GetPropertySetAs<USculptBrushPackCloneMorphOpProps>();
 	Source = Props->Source;
@@ -278,7 +292,7 @@ void FMirrorMorphBrushOp::BeginStroke(const FDynamicMesh3* Mesh, const FSculptBr
 	bToldOfNoPartner = false;
 }
 
-void FMirrorMorphBrushOp::PrepareStamp(const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices)
+void FMirrorMorphBrushOp::PrepareStamp(const FSculptBrushStamp& Stamp, const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices)
 {
 	CopyFrom = GetPropertySetAs<USculptBrushPackMirrorMorphOpProps>()->CopyFrom;
 }
@@ -457,7 +471,7 @@ bool FMushMorphBrushOp::Directions(const FDynamicMesh3& Mesh, EShape Shape, int3
 	return true;
 }
 
-void FMushMorphBrushOp::PrepareStamp(const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices)
+void FMushMorphBrushOp::PrepareStamp(const FSculptBrushStamp& Stamp, const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices)
 {
 	if (RoundCount == 0)
 	{
@@ -511,12 +525,29 @@ FVector3d FMushMorphBrushOp::FullTarget(const FSculptBrushStamp& Stamp, int32 Ve
 	return Target ? *Target : Before;
 }
 
-void FWrinkleMorphBrushOp::BeginStroke(const FDynamicMesh3* Mesh, const FSculptBrushStamp& Stamp, const TArray<int32>& InitialVertices)
+void FNuWrinkleBrushOp::BeginStroke(const FDynamicMesh3* Mesh, const FSculptBrushStamp& Stamp, const TArray<int32>& InitialVertices)
 {
 	FMorphBrushOp::BeginStroke(Mesh, Stamp, InitialVertices);
+	const USculptBrushPackNuWrinkleOpProps* Props = GetPropertySetAs<USculptBrushPackNuWrinkleOpProps>();
+
 	Rise.Reset();
-	PointsSeen = 0;
+	OwnCompression.Reset();
+	Seen.Reset();
+	SqueezeFrom.Reset();
+	// The softening holds for the whole stroke.
+	SoftenedCompression.Reset();
+	SoftenedCompression.SetNum(FMath::Clamp(Props->Soften, 0, Private::MaxSoftenRounds));
+	bBuildUp = Props->bBuildUp;
+	bHasFoldDirection = false;
+	bFoldsInUnposedMesh = false;
+	FoldDirection = FVector3d::ZeroVector;
+	StrokeStart = Stamp.LocalFrame.Origin;
+	for (double& Term : Squeeze)
+	{
+		Term = 0.0;
+	}
 	PointsCompressed = 0;
+	bPointsWait = false;
 	bToldOfMap = false;
 	if (!IsEditable())
 	{
@@ -524,7 +555,7 @@ void FWrinkleMorphBrushOp::BeginStroke(const FDynamicMesh3* Mesh, const FSculptB
 	}
 
 	// The map is read once for a texture and kept while the brush is active.
-	UTexture2D* Texture = GetPropertySetAs<USculptBrushPackWrinkleMorphOpProps>()->WrinkleMap;
+	UTexture2D* Texture = Props->bUseMap ? Props->WrinkleMap.Get() : nullptr;
 	if (!Texture)
 	{
 		MapTexture = nullptr;
@@ -540,73 +571,298 @@ void FWrinkleMorphBrushOp::BeginStroke(const FDynamicMesh3* Mesh, const FSculptB
 	if (Texture && !bHasMap)
 	{
 		bToldOfMap = true;
-		Context->ReportProblem(FText::Format(LOCTEXT("WrinkleMapUnreadable", "Wrinkle Morph could not read the texture {0} as a Wrinkle Map, so nothing is raised. Choose another texture or clear the map."), FText::FromString(Texture->GetName())));
+		Context->ReportProblem(FText::Format(LOCTEXT("WrinkleMapUnreadable", "Nu Wrinkle could not read the texture {0} as a Wrinkle Map, so nothing is raised. Choose another texture or turn off Use Wrinkle Map."), FText::FromString(Texture->GetName())));
 	}
 }
 
-bool FWrinkleMorphBrushOp::ReadTextureAsMap(UTexture2D* Texture, FMapImage& OutMap)
+bool FNuWrinkleBrushOp::ReadTextureAsMap(UTexture2D* Texture, FMapImage& OutMap)
 {
 	return Private::ReadMapWithEngine(Texture, OutMap);
 }
 
-double FWrinkleMorphBrushOp::Compression(const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, int32 Vertex) const
+double FNuWrinkleBrushOp::FoldShape(ESculptBrushPackFoldProfile Profile, double Tent)
 {
-	// The lengths of the point's edges, in the pose and with the pose taken off; both without the edited morph.
-	FVector3d RestPlace;
-	if (!Context->GetUnposedPosition(Vertex, /*bWithEditedMorph*/ false, RestPlace))
+	switch (Profile)
 	{
-		return 0.0;
+	case ESculptBrushPackFoldProfile::Waves:
+		return Tent * Tent * (3.0 - 2.0 * Tent);
+	case ESculptBrushPackFoldProfile::Ridges:
+		return Tent * Tent;
+	case ESculptBrushPackFoldProfile::Rolls:
+	default:
+		return 1.0 - FMath::Square(1.0 - Tent);
+	}
+}
+
+double FNuWrinkleBrushOp::FoldVariation(int64 Fold)
+{
+	// The engine's random stream, seeded with the fold's number: the same fold always gets the same number.
+	return FRandomStream(static_cast<int32>(Fold)).GetFraction();
+}
+
+bool FNuWrinkleBrushOp::GetFoldDirection(FVector3d& OutDirection, bool& bOutInUnposedMesh) const
+{
+	OutDirection = FoldDirection;
+	bOutInUnposedMesh = bFoldsInUnposedMesh;
+	return bHasFoldDirection;
+}
+
+double FNuWrinkleBrushOp::Compression(const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, int32 Vertex)
+{
+	if (const double* Known = OwnCompression.Find(Vertex))
+	{
+		return *Known;
+	}
+
+	// The lengths of the point's edges, in the pose and with the pose taken off; both without the edited morph. Where
+	// they cannot be told the point counts as not compressed.
+	double Share = 0.0;
+	FVector3d RestPlace;
+	if (Without.IsVertex(Vertex) && Context->GetUnposedPosition(Vertex, /*bWithEditedMorph*/ false, RestPlace))
+	{
+		const FVector3d PosedPlace = Without.GetVertex(Vertex);
+		double PosedLength = 0.0;
+		double RestLength = 0.0;
+		bool bKnown = true;
+		for (const int32 Neighbor : Mesh.VtxVerticesItr(Vertex))
+		{
+			FVector3d RestNeighbor;
+			if (!Without.IsVertex(Neighbor) || !Context->GetUnposedPosition(Neighbor, /*bWithEditedMorph*/ false, RestNeighbor))
+			{
+				bKnown = false;
+				break;
+			}
+			PosedLength += UE::Geometry::Distance(Without.GetVertex(Neighbor), PosedPlace);
+			RestLength += UE::Geometry::Distance(RestNeighbor, RestPlace);
+		}
+		if (bKnown && RestLength > 0.0)
+		{
+			const double Shorter = 1.0 - PosedLength / RestLength;
+			if (Shorter > StartsAt)
+			{
+				Share = FullAt > StartsAt ? FMath::Min(1.0, (Shorter - StartsAt) / (FullAt - StartsAt)) : 1.0;
+			}
+		}
+	}
+	OwnCompression.Add(Vertex, Share);
+	return Share;
+}
+
+double FNuWrinkleBrushOp::Softened(const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, int32 Vertex, int32 Round)
+{
+	if (Round == 0)
+	{
+		return Compression(Mesh, Without, Vertex);
+	}
+	if (const double* Known = SoftenedCompression[Round - 1].Find(Vertex))
+	{
+		return *Known;
+	}
+	// The point's share and its neighbors', each counted once, as the round before left them.
+	double Sum = Softened(Mesh, Without, Vertex, Round - 1);
+	int32 Count = 1;
+	for (const int32 Neighbor : Mesh.VtxVerticesItr(Vertex))
+	{
+		Sum += Softened(Mesh, Without, Neighbor, Round - 1);
+		++Count;
+	}
+	const double Share = Sum / static_cast<double>(Count);
+	SoftenedCompression[Round - 1].Add(Vertex, Share);
+	return Share;
+}
+
+void FNuWrinkleBrushOp::AddSqueeze(const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, int32 Vertex)
+{
+	bool bAlreadyAdded = false;
+	SqueezeFrom.Add(Vertex, &bAlreadyAdded);
+	FVector3d RestPlace;
+	if (bAlreadyAdded || !Without.IsVertex(Vertex) || !Context->GetUnposedPosition(Vertex, /*bWithEditedMorph*/ false, RestPlace))
+	{
+		return;
 	}
 	const FVector3d PosedPlace = Without.GetVertex(Vertex);
-	double PosedLength = 0.0;
-	double RestLength = 0.0;
 	for (const int32 Neighbor : Mesh.VtxVerticesItr(Vertex))
 	{
 		FVector3d RestNeighbor;
 		if (!Without.IsVertex(Neighbor) || !Context->GetUnposedPosition(Neighbor, /*bWithEditedMorph*/ false, RestNeighbor))
 		{
-			return 0.0;
+			continue;
 		}
-		PosedLength += UE::Geometry::Distance(Without.GetVertex(Neighbor), PosedPlace);
-		RestLength += UE::Geometry::Distance(RestNeighbor, RestPlace);
+		const FVector3d RestEdge = RestNeighbor - RestPlace;
+		const double RestLength = RestEdge.Length();
+		const double PosedLength = UE::Geometry::Distance(Without.GetVertex(Neighbor), PosedPlace);
+		if (RestLength > 0.0 && PosedLength < RestLength)
+		{
+			// The edge's shortening, as a share of its length, along the edge's own direction in the unposed mesh.
+			const double Shorter = 1.0 - PosedLength / RestLength;
+			const FVector3d Way = RestEdge / RestLength;
+			Squeeze[0] += Shorter * Way.X * Way.X;
+			Squeeze[1] += Shorter * Way.Y * Way.Y;
+			Squeeze[2] += Shorter * Way.Z * Way.Z;
+			Squeeze[3] += Shorter * Way.X * Way.Y;
+			Squeeze[4] += Shorter * Way.X * Way.Z;
+			Squeeze[5] += Shorter * Way.Y * Way.Z;
+		}
 	}
-	if (!(RestLength > 0.0))
-	{
-		return 0.0;
-	}
-	const double Shorter = 1.0 - PosedLength / RestLength;
-	if (Shorter <= StartsAt)
-	{
-		return 0.0;
-	}
-	return FullAt > StartsAt ? FMath::Min(1.0, (Shorter - StartsAt) / (FullAt - StartsAt)) : 1.0;
 }
 
-void FWrinkleMorphBrushOp::PrepareStamp(const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices)
+bool FNuWrinkleBrushOp::FindSqueezeDirection(FVector3d& OutDirection) const
 {
-	const USculptBrushPackWrinkleMorphOpProps* Props = GetPropertySetAs<USculptBrushPackWrinkleMorphOpProps>();
+	auto Times = [this](const FVector3d& V)
+	{
+		return FVector3d(
+			Squeeze[0] * V.X + Squeeze[3] * V.Y + Squeeze[4] * V.Z,
+			Squeeze[3] * V.X + Squeeze[1] * V.Y + Squeeze[5] * V.Z,
+			Squeeze[4] * V.X + Squeeze[5] * V.Y + Squeeze[2] * V.Z);
+	};
+
+	// The direction the sum stretches most is found by multiplying a start by the sum again and again. The start leans
+	// on no axis; another is tried where the first happens to lie square to the direction sought.
+	const FVector3d Starts[3] = { FVector3d(1, 1, 1), FVector3d(1, 0, 0), FVector3d(0, 1, 0) };
+	for (const FVector3d& Start : Starts)
+	{
+		FVector3d Axis = Start;
+		bool bFound = true;
+		for (int32 Round = 0; Round < Private::SqueezeRounds && bFound; ++Round)
+		{
+			const FVector3d Next = Times(Axis);
+			const double Length = Next.Length();
+			bFound = Length > 0.0;
+			if (bFound)
+			{
+				Axis = Next / Length;
+			}
+		}
+		if (bFound)
+		{
+			// Of the two ways along that direction, always the same one: that whose largest part is positive.
+			const FVector3d Size(FMath::Abs(Axis.X), FMath::Abs(Axis.Y), FMath::Abs(Axis.Z));
+			const double Largest = Size.X >= Size.Y && Size.X >= Size.Z ? Axis.X : (Size.Y >= Size.Z ? Axis.Y : Axis.Z);
+			OutDirection = Largest < 0.0 ? -Axis : Axis;
+			return true;
+		}
+	}
+	return false;
+}
+
+void FNuWrinkleBrushOp::PrepareStamp(const FSculptBrushStamp& Stamp, const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices)
+{
+	const USculptBrushPackNuWrinkleOpProps* Props = GetPropertySetAs<USculptBrushPackNuWrinkleOpProps>();
 	Height = Props->Height;
+	bBuildUp = Props->bBuildUp;
 	bOnlyWhereCompressed = Props->bOnlyWhereCompressed;
 	StartsAt = Props->StartsAt;
 	FullAt = Props->FullAt;
+	bFolds = Props->bFolds;
+	Direction = Props->Direction;
+	Spacing = Props->Spacing;
+	Profile = Props->Profile;
+	bCutBetween = Props->bCutBetween;
+	Irregularity = Props->Irregularity;
 	bMidGreyIsFlat = Props->bMidGreyIsFlat;
 	MapTiling = Props->MapTiling;
 	UVChannel = Props->UVChannel;
-	const bool bWantsMap = Props->WrinkleMap != nullptr;
+	const bool bWantsMap = Props->bUseMap && Props->WrinkleMap != nullptr;
+	const bool bLaysFolds = bFolds && Spacing > 0.0;
 
-	bool bLacksUV = false;
+	// The points whose rise this stamp may settle, each with the share its compression gives it.
+	TArray<TPair<int32, double>> Unsettled;
+	bool bNeedsDirection = false;
 	for (const int32 Vertex : Vertices)
 	{
 		if (Rise.Contains(Vertex) || !Without.IsVertex(Vertex))
 		{
 			continue;
 		}
-		++PointsSeen;
-		const double Share = bOnlyWhereCompressed ? Compression(Mesh, Without, Vertex) : 1.0;
-		PointsCompressed += Share > 0.0 ? 1 : 0;
+		const double Share = bOnlyWhereCompressed ? Softened(Mesh, Without, Vertex, SoftenedCompression.Num()) : 1.0;
+		bool bAlreadySeen = false;
+		Seen.Add(Vertex, &bAlreadySeen);
+		if (!bAlreadySeen && Share > 0.0)
+		{
+			++PointsCompressed;
+		}
+		bNeedsDirection |= bLaysFolds && Share > 0.0;
+		Unsettled.Emplace(Vertex, Share);
+	}
 
-		// The pattern: the map's value at the point's place in the mesh's UVs, or 1 without a map.
+	// The folds' direction, found with the first stamp that needs it and kept for the stroke.
+	if (bNeedsDirection && !bHasFoldDirection)
+	{
+		if (Direction == ESculptBrushPackFoldDirection::AcrossCompression)
+		{
+			// What the shortened edges around the points that will rise, and around their neighbors, agree on.
+			for (const TPair<int32, double>& Point : Unsettled)
+			{
+				if (Point.Value > 0.0)
+				{
+					AddSqueeze(Mesh, Without, Point.Key);
+					for (const int32 Neighbor : Mesh.VtxVerticesItr(Point.Key))
+					{
+						AddSqueeze(Mesh, Without, Neighbor);
+					}
+				}
+			}
+			if (FindSqueezeDirection(FoldDirection))
+			{
+				bHasFoldDirection = true;
+				bFoldsInUnposedMesh = true;
+			}
+		}
+		if (!bHasFoldDirection)
+		{
+			// Across the way the stroke has moved since it began; the folds then run along the stroke.
+			const FVector3d Normal = Stamp.LocalFrame.Z();
+			FVector3d Step = Stamp.LocalFrame.Origin - StrokeStart;
+			Step -= Normal * Step.Dot(Normal);
+			const double StepLength = Step.Length();
+			if (StepLength > 0.0)
+			{
+				FoldDirection = Normal.Cross(Step / StepLength);
+				bHasFoldDirection = true;
+				bFoldsInUnposedMesh = false;
+			}
+		}
+	}
+
+	bool bLacksUV = false;
+	for (const TPair<int32, double>& Point : Unsettled)
+	{
+		const int32 Vertex = Point.Key;
+		const double Share = Point.Value;
+		const bool bInAFold = bLaysFolds && Share > 0.0;
+		if (bInAFold && !bHasFoldDirection)
+		{
+			// The point waits for the stroke to move; a later stamp settles it.
+			bPointsWait = true;
+			continue;
+		}
+
 		double Pattern = 1.0;
+		if (bInAFold)
+		{
+			// The point's place along the folds' direction says which fold it is in and how far across it.
+			double Place = 0.0;
+			FVector3d Unposed;
+			if (!bFoldsInUnposedMesh)
+			{
+				Place = (Without.GetVertex(Vertex) - StrokeStart).Dot(FoldDirection);
+			}
+			else if (Context->GetUnposedPosition(Vertex, /*bWithEditedMorph*/ false, Unposed))
+			{
+				Place = Unposed.Dot(FoldDirection);
+			}
+			const double Folds = Place / Spacing;
+			const double Fold = FMath::FloorToDouble(Folds);
+			const double Tent = 1.0 - FMath::Abs(2.0 * (Folds - Fold) - 1.0);
+			double Shape = FoldShape(Profile, Tent);
+			if (bCutBetween)
+			{
+				Shape = 2.0 * Shape - 1.0;
+			}
+			Pattern = Shape * (1.0 - Irregularity * FoldVariation(static_cast<int64>(Fold)));
+		}
+
+		// The Wrinkle Map's value at the point's place in the mesh's UVs.
 		if (bWantsMap)
 		{
 			FVector2d UV;
@@ -622,7 +878,7 @@ void FWrinkleMorphBrushOp::PrepareStamp(const FDynamicMesh3& Mesh, const FDynami
 			else
 			{
 				const double Value = Map.BilinearSampleUV<float, UE::Geometry::EImageTilingMethod::Wrap>(UV * MapTiling, 0.0f);
-				Pattern = bMidGreyIsFlat ? 2.0 * Value - 1.0 : Value;
+				Pattern *= bMidGreyIsFlat ? 2.0 * Value - 1.0 : Value;
 			}
 		}
 
@@ -644,11 +900,11 @@ void FWrinkleMorphBrushOp::PrepareStamp(const FDynamicMesh3& Mesh, const FDynami
 	if (bLacksUV && !bToldOfMap)
 	{
 		bToldOfMap = true;
-		Context->ReportProblem(FText::Format(LOCTEXT("WrinkleNoUVs", "Wrinkle Morph: the mesh has no UV channel {0} to read the Wrinkle Map with, so nothing is raised there. Choose another UV Channel or clear the map."), FText::AsNumber(UVChannel)));
+		Context->ReportProblem(FText::Format(LOCTEXT("WrinkleNoUVs", "Nu Wrinkle: the mesh has no UV channel {0} to read the Wrinkle Map with, so nothing is raised there. Choose another UV Channel or turn off Use Wrinkle Map."), FText::AsNumber(UVChannel)));
 	}
 }
 
-FVector3d FWrinkleMorphBrushOp::FullTarget(const FSculptBrushStamp& Stamp, int32 Vertex, const FVector3d& Before, const FVector3d& Base) const
+FVector3d FNuWrinkleBrushOp::FullTarget(const FSculptBrushStamp& Stamp, int32 Vertex, const FVector3d& Before, const FVector3d& Base) const
 {
 	const FVector3d* Up = Rise.Find(Vertex);
 	if (!Up)
@@ -658,12 +914,19 @@ FVector3d FWrinkleMorphBrushOp::FullTarget(const FSculptBrushStamp& Stamp, int32
 	return Stamp.Direction < 0.0 ? Before - *Up : Before + *Up;
 }
 
-void FWrinkleMorphBrushOp::EndStroke(const FDynamicMesh3* Mesh, const FSculptBrushStamp& Stamp, const TArray<int32>& FinalVertices)
+void FNuWrinkleBrushOp::EndStroke(const FDynamicMesh3* Mesh, const FSculptBrushStamp& Stamp, const TArray<int32>& FinalVertices)
 {
-	// A stroke over surface that is nowhere compressed does nothing; the user is told what to do about it.
-	if (IsEditable() && bOnlyWhereCompressed && PointsSeen > 0 && PointsCompressed == 0 && !bToldOfMap)
+	// A stroke that could not act says why once it is over; the user is told what to do about it.
+	if (IsEditable() && !bToldOfMap)
 	{
-		Context->ReportProblem(LOCTEXT("WrinkleNothingCompressed", "Wrinkle Morph raises wrinkles where the posed surface is shorter than at rest, and nothing under the brush was. Pose the mesh so that the surface bunches up, or turn off Only Where Compressed."));
+		if (bPointsWait && !bHasFoldDirection)
+		{
+			Context->ReportProblem(LOCTEXT("NuWrinkleStrokeDidNotMove", "Nu Wrinkle lays its folds along the stroke here, and the stroke did not move. Drag the brush, or turn Folds off to raise the surface evenly."));
+		}
+		else if (bOnlyWhereCompressed && Seen.Num() > 0 && PointsCompressed == 0)
+		{
+			Context->ReportProblem(LOCTEXT("WrinkleNothingCompressed", "Nu Wrinkle raises wrinkles where the posed surface is shorter than at rest, and nothing under the brush was. Pose the mesh so that the surface bunches up, or turn off Only Where Compressed."));
+		}
 	}
 	FMorphBrushOp::EndStroke(Mesh, Stamp, FinalVertices);
 }
@@ -705,10 +968,13 @@ USculptBrushPackMushMorphOpProps::USculptBrushPackMushMorphOpProps()
 	Strength = 1.0f;
 }
 
-USculptBrushPackWrinkleMorphOpProps::USculptBrushPackWrinkleMorphOpProps()
+USculptBrushPackNuWrinkleOpProps::USculptBrushPackNuWrinkleOpProps()
 {
 	// At full strength the middle of the brush raises the whole Height.
 	Strength = 1.0f;
+	// One of the maps that come with the plugin stands in the Wrinkle Map as an example. Where the plugin's content is
+	// not there, the map is simply none.
+	WrinkleMap = LoadObject<UTexture2D>(nullptr, TEXT("/SculptBrushPackMorph/WrinkleMaps/T_WrinkleMap_Folds.T_WrinkleMap_Folds"), nullptr, LOAD_Quiet | LOAD_NoWarn);
 }
 
 #undef LOCTEXT_NAMESPACE

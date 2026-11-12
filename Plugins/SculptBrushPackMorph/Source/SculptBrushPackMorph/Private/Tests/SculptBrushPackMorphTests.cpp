@@ -226,6 +226,26 @@ namespace SculptBrushPackMorphTestLocals
 		return Mesh;
 	}
 
+	/** As MakeCross, with the arms measured from the middle: HalfX along X and 4 along Y either side of Center. */
+	static FDynamicMesh3 MakeCrossAt(const FVector3d& Center, double HalfX)
+	{
+		FDynamicMesh3 Mesh = MakeCross(Center, HalfX);
+		for (int32 Arm = 1; Arm <= 4; ++Arm)
+		{
+			Mesh.SetVertex(Arm, Mesh.GetVertex(Arm) + FVector3d(Center.X, Center.Y, Center.Z));
+		}
+		return Mesh;
+	}
+
+	/** One stamp on the given vertices of the mesh; returns their new positions in the order given. */
+	static TArray<FVector3d> ApplyTo(FMeshSculptBrushOp& Op, const FDynamicMesh3& Mesh, const FSculptBrushStamp& Stamp, const TArray<int32>& Vertices)
+	{
+		TArray<FVector3d> NewPositions;
+		NewPositions.SetNum(Vertices.Num());
+		Op.ApplyStamp(&Mesh, Stamp, Vertices, NewPositions);
+		return NewPositions;
+	}
+
 	/** A mesh's places, by vertex ID. */
 	static TArray<FVector3d> PlacesOf(const FDynamicMesh3& Mesh)
 	{
@@ -573,10 +593,10 @@ bool FSculptBrushPackMorphMushTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSculptBrushPackMorphWrinkleTest, "SculptBrushPackMorph.Brushes.WrinkleMorph",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSculptBrushPackMorphNuWrinkleTest, "SculptBrushPackMorph.Brushes.NuWrinkle",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 
-bool FSculptBrushPackMorphWrinkleTest::RunTest(const FString& Parameters)
+bool FSculptBrushPackMorphNuWrinkleTest::RunTest(const FString& Parameters)
 {
 	using namespace SculptBrushPackMorphTestLocals;
 
@@ -587,14 +607,30 @@ bool FSculptBrushPackMorphWrinkleTest::RunTest(const FString& Parameters)
 	Context->UnposedWithout = PlacesOf(MakeCross(FVector3d(0, 0, 0), 4));
 	const FDynamicMesh3 Shown = MakeCross(FVector3d(0, 0, 0.5), 3);
 
-	FWrinkleMorphBrushOp Wrinkle(Context);
-	USculptBrushPackWrinkleMorphOpProps* Settings = Prepare<FWrinkleMorphBrushOp, USculptBrushPackWrinkleMorphOpProps>(Wrinkle);
-	TestEqual(TEXT("Wrinkle Morph's Height is 0.5"), Settings->Height, 0.5f, 0.0f);
+	FNuWrinkleBrushOp Wrinkle(Context);
+	USculptBrushPackNuWrinkleOpProps* Settings = Prepare<FNuWrinkleBrushOp, USculptBrushPackNuWrinkleOpProps>(Wrinkle);
+	TestEqual(TEXT("Nu Wrinkle's Height is 0.5"), Settings->Height, 0.5f, 0.0f);
 	TestTrue(TEXT("it raises only where the surface is compressed"), Settings->bOnlyWhereCompressed);
 	TestEqual(TEXT("from 0.02 shorter"), Settings->StartsAt, 0.02f, 0.0f);
 	TestEqual(TEXT("fully at 0.25 shorter"), Settings->FullAt, 0.25f, 0.0f);
-	TestNull(TEXT("it has no Wrinkle Map"), Settings->WrinkleMap.Get());
+	TestEqual(TEXT("softened once"), Settings->Soften, 1);
+	TestFalse(TEXT("It does not build up"), Settings->bBuildUp);
+	TestTrue(TEXT("It lays folds"), Settings->bFolds);
+	TestTrue(TEXT("across the compression"), Settings->Direction == ESculptBrushPackFoldDirection::AcrossCompression);
+	TestEqual(TEXT("2 apart"), Settings->Spacing, 2.0f, 0.0f);
+	TestTrue(TEXT("as rolls"), Settings->Profile == ESculptBrushPackFoldProfile::Rolls);
+	TestFalse(TEXT("that rise and do not cut between"), Settings->bCutBetween);
+	TestEqual(TEXT("with an irregularity of a quarter"), Settings->Irregularity, 0.25f, 0.0f);
+	TestFalse(TEXT("It does not use a Wrinkle Map"), Settings->bUseMap);
+	if (TestNotNull(TEXT("but one stands there as an example"), Settings->WrinkleMap.Get()))
+	{
+		TestEqual(TEXT("It is the folds map that comes with the plugin"), Settings->WrinkleMap->GetPathName(), FString(TEXT("/SculptBrushPackMorph/WrinkleMaps/T_WrinkleMap_Folds.T_WrinkleMap_Folds")));
+	}
 	TestEqual(TEXT("and its Strength is 1"), Settings->Strength, 1.0f, 0.0f);
+
+	// This test is of the even rise: no folds, and each point's own compression. The folds have a test of their own.
+	Settings->bFolds = false;
+	Settings->Soften = 0;
 
 	// An eighth shorter, with the wrinkle whole at a quarter: half of a Height of 2, along the normal, which is straight
 	// up, from the middle's place before the stroke.
@@ -642,9 +678,11 @@ bool FSculptBrushPackMorphWrinkleTest::RunTest(const FString& Parameters)
 	AtRest->Without = MakeCross(FVector3d(0, 0, 0), 4);
 	AtRest->UnposedWithout = PlacesOf(AtRest->Without);
 	const FDynamicMesh3 ShownAtRest = MakeCross(FVector3d(0, 0, 0.5), 4);
-	FWrinkleMorphBrushOp WrinkleAtRest(AtRest);
-	USculptBrushPackWrinkleMorphOpProps* AtRestSettings = Prepare<FWrinkleMorphBrushOp, USculptBrushPackWrinkleMorphOpProps>(WrinkleAtRest);
+	FNuWrinkleBrushOp WrinkleAtRest(AtRest);
+	USculptBrushPackNuWrinkleOpProps* AtRestSettings = Prepare<FNuWrinkleBrushOp, USculptBrushPackNuWrinkleOpProps>(WrinkleAtRest);
 	AtRestSettings->Height = 2.0f;
+	AtRestSettings->bFolds = false;
+	AtRestSettings->Soften = 0;
 	WrinkleAtRest.BeginStroke(&ShownAtRest, Stamp, {});
 	TestPoint(this, TEXT("At rest nothing is compressed: the middle stays"), Apply(WrinkleAtRest, ShownAtRest, Stamp)[0], FVector3d(0, 0, 0.5));
 	TestTrue(TEXT("Nothing is said while the stroke is under way"), AtRest->Problem.IsEmpty());
@@ -664,7 +702,7 @@ bool FSculptBrushPackMorphWrinkleTest::RunTest(const FString& Parameters)
 	//   top row:    0.25  0.5
 	//   bottom row: 0.75  1
 	int32 TimesRead = 0;
-	WrinkleAtRest.ReadMap = [&TimesRead](UTexture2D*, FWrinkleMorphBrushOp::FMapImage& OutMap)
+	WrinkleAtRest.ReadMap = [&TimesRead](UTexture2D*, FNuWrinkleBrushOp::FMapImage& OutMap)
 	{
 		++TimesRead;
 		OutMap.SetDimensions(UE::Geometry::FImageDimensions(2, 2));
@@ -674,6 +712,7 @@ bool FSculptBrushPackMorphWrinkleTest::RunTest(const FString& Parameters)
 		OutMap.SetPixel(1, 1, 1.0f);
 		return true;
 	};
+	AtRestSettings->bUseMap = true;
 	AtRestSettings->WrinkleMap = NewObject<UTexture2D>(GetTransientPackage());
 	// The middle sits at the center of the top right texel; the arms at the center of the top left.
 	AtRest->UVs.Init(FVector2d(0.25, 0.25), 5);
@@ -710,14 +749,172 @@ bool FSculptBrushPackMorphWrinkleTest::RunTest(const FString& Parameters)
 	Unreadable->Without = AtRest->Without;
 	Unreadable->UnposedWithout = AtRest->UnposedWithout;
 	Unreadable->UVs.Init(FVector2d(0.25, 0.25), 5);
-	FWrinkleMorphBrushOp WrinkleUnreadable(Unreadable);
-	USculptBrushPackWrinkleMorphOpProps* UnreadableSettings = Prepare<FWrinkleMorphBrushOp, USculptBrushPackWrinkleMorphOpProps>(WrinkleUnreadable);
+	FNuWrinkleBrushOp WrinkleUnreadable(Unreadable);
+	USculptBrushPackNuWrinkleOpProps* UnreadableSettings = Prepare<FNuWrinkleBrushOp, USculptBrushPackNuWrinkleOpProps>(WrinkleUnreadable);
 	UnreadableSettings->bOnlyWhereCompressed = false;
+	UnreadableSettings->bFolds = false;
+	UnreadableSettings->bUseMap = true;
 	UnreadableSettings->WrinkleMap = NewObject<UTexture2D>(GetTransientPackage());
-	WrinkleUnreadable.ReadMap = [](UTexture2D*, FWrinkleMorphBrushOp::FMapImage&) { return false; };
+	WrinkleUnreadable.ReadMap = [](UTexture2D*, FNuWrinkleBrushOp::FMapImage&) { return false; };
 	WrinkleUnreadable.BeginStroke(&ShownAtRest, Stamp, {});
 	TestTrue(TEXT("A texture that cannot be read is reported as the stroke begins"), Unreadable->Problem.ToString().Contains(TEXT("could not read")));
 	TestPoint(this, TEXT("and the middle stays"), Apply(WrinkleUnreadable, ShownAtRest, Stamp)[0], FVector3d(0, 0, 0.5));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSculptBrushPackMorphNuWrinkleFoldsTest, "SculptBrushPackMorph.Brushes.NuWrinkleFolds",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FSculptBrushPackMorphNuWrinkleFoldsTest::RunTest(const FString& Parameters)
+{
+	using namespace SculptBrushPackMorphTestLocals;
+
+	// The cross of the other test, with its middle at (1, 0, 0): at rest the middle's edges are 4 long each, and the pose
+	// pulls the two arms along X in to 3, an eighth shorter. Whole at a quarter, the middle's compression is a half.
+	const TSharedRef<FTestContext> Context = MakeShared<FTestContext>();
+	Context->Without = MakeCrossAt(FVector3d(1, 0, 0), 3);
+	Context->UnposedWithout = PlacesOf(MakeCrossAt(FVector3d(1, 0, 0), 4));
+	const FDynamicMesh3 Shown = Context->Without;
+
+	FNuWrinkleBrushOp Wrinkle(Context);
+	USculptBrushPackNuWrinkleOpProps* Settings = Prepare<FNuWrinkleBrushOp, USculptBrushPackNuWrinkleOpProps>(Wrinkle);
+	Settings->Height = 2.0f;
+	Settings->StartsAt = 0.0f;
+	Settings->FullAt = 0.25f;
+	Settings->Soften = 0;
+	Settings->Spacing = 4.0f;
+	Settings->Irregularity = 0.0f;
+	const FSculptBrushStamp Stamp = MakeStamp(FVector3d(1, 0, 0));
+
+	// The surface is squeezed along X, so the folds lie across X, 4 apart, and a point's place along X in the unposed
+	// mesh says where in a fold it is. The middle stands at 1: a quarter of the way across its fold, where the tent is a
+	// half. Rolls make 1 - (1 - 0.5) squared = 0.75 of that, and the rise is Height 2 x compression 0.5 x 0.75.
+	Wrinkle.BeginStroke(&Shown, Stamp, {});
+	TestPoint(this, TEXT("Rolls: a quarter of the way across a fold the middle rises by 0.75"), ApplyTo(Wrinkle, Shown, Stamp, { 0 })[0], FVector3d(1, 0, 0.75));
+	FVector3d Direction;
+	bool bInUnposedMesh = false;
+	if (TestTrue(TEXT("The folds have a direction"), Wrinkle.GetFoldDirection(Direction, bInUnposedMesh)))
+	{
+		TestTrue(TEXT("It is measured in the unposed mesh"), bInUnposedMesh);
+		TestTrue(TEXT("It is the way the surface is squeezed, along X"), Direction.X > 0.0 && FMath::Abs(Direction.X) > FMath::Abs(Direction.Y) && Direction.Z == 0.0);
+	}
+	TestPoint(this, TEXT("A second pass adds nothing"), ApplyTo(Wrinkle, Shown, Stamp, { 0 })[0], FVector3d(1, 0, 0.75));
+
+	// The other profiles at the same place: Waves 0.25 x (3 - 1) = 0.5, Ridges 0.25.
+	Settings->Profile = ESculptBrushPackFoldProfile::Waves;
+	Wrinkle.BeginStroke(&Shown, Stamp, {});
+	TestPoint(this, TEXT("Waves: the middle rises by 0.5"), ApplyTo(Wrinkle, Shown, Stamp, { 0 })[0], FVector3d(1, 0, 0.5));
+	Settings->Profile = ESculptBrushPackFoldProfile::Ridges;
+	Wrinkle.BeginStroke(&Shown, Stamp, {});
+	TestPoint(this, TEXT("Ridges: the middle rises by 0.25"), ApplyTo(Wrinkle, Shown, Stamp, { 0 })[0], FVector3d(1, 0, 0.25));
+	TestEqual(TEXT("A roll's shape at its edge is 0"), FNuWrinkleBrushOp::FoldShape(ESculptBrushPackFoldProfile::Rolls, 0.0), 0.0, 0.0);
+	TestEqual(TEXT("and at its middle 1"), FNuWrinkleBrushOp::FoldShape(ESculptBrushPackFoldProfile::Rolls, 1.0), 1.0, 0.0);
+	TestEqual(TEXT("A wave's shape at its middle is 1"), FNuWrinkleBrushOp::FoldShape(ESculptBrushPackFoldProfile::Waves, 1.0), 1.0, 0.0);
+	TestEqual(TEXT("A ridge's shape at its middle is 1"), FNuWrinkleBrushOp::FoldShape(ESculptBrushPackFoldProfile::Ridges, 1.0), 1.0, 0.0);
+
+	// Cut Between: twice the shape less 1. For Rolls at the same place 2 x 0.75 - 1 = 0.5.
+	Settings->Profile = ESculptBrushPackFoldProfile::Rolls;
+	Settings->bCutBetween = true;
+	Wrinkle.BeginStroke(&Shown, Stamp, {});
+	TestPoint(this, TEXT("Cut Between: the middle rises by 0.5"), ApplyTo(Wrinkle, Shown, Stamp, { 0 })[0], FVector3d(1, 0, 0.5));
+	Settings->bCutBetween = false;
+
+	// A wider spacing puts the middle elsewhere in its fold: 16 apart, it is a sixteenth of the way across, where the
+	// tent is an eighth and a roll 1 - (7/8) squared = 15/64.
+	Settings->Spacing = 16.0f;
+	Wrinkle.BeginStroke(&Shown, Stamp, {});
+	TestPoint(this, TEXT("A spacing of 16: the middle rises by 15/64"), ApplyTo(Wrinkle, Shown, Stamp, { 0 })[0], FVector3d(1, 0, 15.0 / 64.0));
+	Settings->Spacing = 4.0f;
+
+	// Irregularity lowers each fold by a number of its own: the middle is in fold 0.
+	const double OfFoldNought = FNuWrinkleBrushOp::FoldVariation(0);
+	TestTrue(TEXT("A fold's number is from 0 to 1"), OfFoldNought >= 0.0 && OfFoldNought < 1.0);
+	TestTrue(TEXT("and another fold has another"), FNuWrinkleBrushOp::FoldVariation(1) != OfFoldNought);
+	TestEqual(TEXT("The same fold always has the same number"), FNuWrinkleBrushOp::FoldVariation(0), OfFoldNought, 0.0);
+	Settings->Irregularity = 1.0f;
+	Wrinkle.BeginStroke(&Shown, Stamp, {});
+	TestPoint(this, TEXT("Irregularity 1: the fold is lower by its number"), ApplyTo(Wrinkle, Shown, Stamp, { 0 })[0], FVector3d(1, 0, 2.0 * 0.5 * (0.75 * (1.0 - 1.0 * OfFoldNought))));
+	Settings->Irregularity = 0.0f;
+
+	// Soften: each point's compression is averaged with its neighbors', each counted once. With no folds the rise is
+	// Height x compression, so the compression of every point is read off a stroke without softening, and the middle's
+	// softened rise is worked out from those, in the order the mesh lists the middle's neighbors.
+	Settings->bFolds = false;
+	Wrinkle.BeginStroke(&Shown, Stamp, {});
+	const TArray<FVector3d> Unsoftened = Apply(Wrinkle, Shown, Stamp);
+	TestPoint(this, TEXT("Unsoftened, the middle rises by Height x a half"), Unsoftened[0], FVector3d(1, 0, 1));
+	double Sum = Unsoftened[0].Z / 2.0;
+	int32 Count = 1;
+	for (const int32 Neighbor : Shown.VtxVerticesItr(0))
+	{
+		Sum += Unsoftened[Neighbor].Z / 2.0;
+		++Count;
+	}
+	TestEqual(TEXT("The middle has four neighbors"), Count, 5);
+	Settings->Soften = 1;
+	Wrinkle.BeginStroke(&Shown, Stamp, {});
+	TestPoint(this, TEXT("Softened once: the middle rises by Height x the average of the five"), Apply(Wrinkle, Shown, Stamp)[0], FVector3d(1, 0, 2.0 * (Sum / 5.0)));
+	Settings->Soften = 0;
+
+	// On a mesh that stands as at rest nothing is squeezed, and with Only Where Compressed off the folds run along the
+	// stroke: across the way it first moves. The stroke begins at the middle and has not moved with its first stamp:
+	// the points wait.
+	const TSharedRef<FTestContext> AtRest = MakeShared<FTestContext>();
+	AtRest->Without = MakeCrossAt(FVector3d(1, 0, 0), 4);
+	AtRest->UnposedWithout = PlacesOf(AtRest->Without);
+	const FDynamicMesh3 ShownAtRest = AtRest->Without;
+	FNuWrinkleBrushOp Along(AtRest);
+	USculptBrushPackNuWrinkleOpProps* AlongSettings = Prepare<FNuWrinkleBrushOp, USculptBrushPackNuWrinkleOpProps>(Along);
+	AlongSettings->Height = 2.0f;
+	AlongSettings->bOnlyWhereCompressed = false;
+	AlongSettings->Direction = ESculptBrushPackFoldDirection::AlongStroke;
+	AlongSettings->Spacing = 16.0f;
+	AlongSettings->Irregularity = 0.0f;
+	const FSculptBrushStamp First = MakeStamp(FVector3d(1, 0, 0));
+	Along.BeginStroke(&ShownAtRest, First, {});
+	TArray<FVector3d> Moved = Apply(Along, ShownAtRest, First);
+	TestPoint(this, TEXT("Along Stroke, before the stroke has moved: an arm waits"), Moved[2], FVector3d(1, 4, 0));
+	TestFalse(TEXT("and the folds have no direction yet"), Along.GetFoldDirection(Direction, bInUnposedMesh));
+
+	// The stroke moves on along X: the folds run along X, and places across them are measured along Y from where the
+	// stroke began. The arm at (1, 4, 0) is 4 across, a quarter of a fold of 16: a roll of 0.75, times Height 2. The middle
+	// is on a fold's edge and stays.
+	const FSculptBrushStamp Second = MakeStamp(FVector3d(5, 0, 0));
+	Moved = Apply(Along, ShownAtRest, Second);
+	TestPoint(this, TEXT("Along Stroke, once it has moved: the arm a quarter of a fold across rises by 1.5"), Moved[2], FVector3d(1, 4, 1.5));
+	TestPoint(this, TEXT("and the middle, on a fold's edge, stays"), Moved[0], FVector3d(1, 0, 0));
+	if (TestTrue(TEXT("The folds have a direction now"), Along.GetFoldDirection(Direction, bInUnposedMesh)))
+	{
+		TestFalse(TEXT("It is measured in the shown mesh"), bInUnposedMesh);
+		TestPoint(this, TEXT("It lies across the stroke, along Y"), Direction, FVector3d(0, 1, 0));
+	}
+	Along.EndStroke(&ShownAtRest, Second, {});
+	TestTrue(TEXT("Nothing is reported"), AtRest->Problem.IsEmpty());
+
+	// A stroke that never moves leaves its points waiting, and says so when it ends.
+	Along.BeginStroke(&ShownAtRest, First, {});
+	TestPoint(this, TEXT("A stroke that does not move raises nothing"), Apply(Along, ShownAtRest, First)[2], FVector3d(1, 4, 0));
+	Along.EndStroke(&ShownAtRest, First, {});
+	TestTrue(TEXT("and the brush says the stroke did not move"), AtRest->Problem.ToString().Contains(TEXT("did not move")));
+
+	// With Across Compression on the same mesh, where nothing is squeezed, the folds fall back on the stroke's way.
+	AlongSettings->Direction = ESculptBrushPackFoldDirection::AcrossCompression;
+	Along.BeginStroke(&ShownAtRest, First, {});
+	TestTrue(TEXT("A stroke that can act takes the report back"), AtRest->Problem.IsEmpty());
+	Apply(Along, ShownAtRest, First);
+	TestPoint(this, TEXT("Across Compression with nothing squeezed: the folds run along the stroke"), Apply(Along, ShownAtRest, Second)[2], FVector3d(1, 4, 1.5));
+
+	// Build Up: a point's reach grows by strength x time x 6 with every stamp, here 1 x 1/8 x 6 = 0.75, up to 1.
+	AlongSettings->bFolds = false;
+	AlongSettings->bBuildUp = true;
+	Along.BeginStroke(&ShownAtRest, First, {});
+	TestPoint(this, TEXT("Build Up: one stamp raises the middle by three quarters of the Height"), Apply(Along, ShownAtRest, First)[0], FVector3d(1, 0, 1.5));
+	TestPoint(this, TEXT("Build Up: a second stamp brings it to the Height"), Apply(Along, ShownAtRest, First)[0], FVector3d(1, 0, 2));
+	TestPoint(this, TEXT("Build Up: and it stops there"), Apply(Along, ShownAtRest, First)[0], FVector3d(1, 0, 2));
+	FSculptBrushStamp Light = First;
+	Light.Power = 0.5;
+	Along.BeginStroke(&ShownAtRest, Light, {});
+	TestPoint(this, TEXT("Build Up: at half power a stamp raises it half as much"), Apply(Along, ShownAtRest, Light)[0], FVector3d(1, 0, 0.75));
 	return true;
 }
 
@@ -953,6 +1150,38 @@ namespace SculptBrushPackMorphTestLocals
 		return true;
 	}
 
+	/**
+	 * One stroke dragged from where one ray meets the shown mesh to where another does, in Steps moves of the mouse with a
+	 * tick after each; the rays in between start on the line between the two rays' starts and point as From does.
+	 *
+	 * The tool's Ray Density is 0 for the stroke. In the tool's stroke mode Spacing, with a Ray Density above 0, the tool
+	 * fills in rays between two moves from where the viewport's camera is (MeshSculptToolBase.cpp:1058-1139 in 5.8.4: it
+	 * meets each ray's hit with a plane in front of the camera, and a hit behind the camera gives no ray at all). A test
+	 * without a viewport has no camera to speak of. At 0 the moves themselves give the stamps (MeshSculptToolBase.cpp:1052-1057),
+	 * and the tool's Stamp Spacing still thins them.
+	 */
+	static bool DragAlong(UMeshVertexSculptTool& Tool, const FRay& From, const FRay& To, int32 Steps = 16)
+	{
+		FHitResult Hit;
+		if (!Tool.HitTest(From, Hit) || !Tool.HitTest(To, Hit))
+		{
+			return false;
+		}
+		const float RayDensity = Tool.BrushProperties->RayDensity;
+		Tool.BrushProperties->RayDensity = 0.0f;
+		Tool.OnBeginDrag(From);
+		Tool.Tick(0.03f);
+		for (int32 Step = 1; Step <= Steps; ++Step)
+		{
+			Tool.OnUpdateDrag(FRay(FMath::Lerp(From.Origin, To.Origin, static_cast<double>(Step) / Steps), From.Direction));
+			Tool.Tick(0.03f);
+		}
+		Tool.OnEndDrag(To);
+		Tool.Tick(0.03f);
+		Tool.BrushProperties->RayDensity = RayDensity;
+		return true;
+	}
+
 	/** Ends the session's tool and starts Sculpt Morph Target again, as choosing it again in the editor does. */
 	static bool RestartTool(FAutomationTestBase& Test, FMorphToolSession& Session)
 	{
@@ -1024,8 +1253,8 @@ bool FSculptBrushPackMorphWrinkleMapTest::RunTest(const FString& Parameters)
 	const uint8 Pixels[16] = { 0, 0, 0, 255,  255, 255, 255, 255,  0, 0, 0, 255,  0, 0, 0, 255 };
 	Texture->Source.Init(2, 2, 1, 1, TSF_BGRA8, Pixels);
 
-	FWrinkleMorphBrushOp::FMapImage Map;
-	if (TestTrue(TEXT("The texture is read as a Wrinkle Map"), FWrinkleMorphBrushOp::ReadTextureAsMap(Texture, Map)))
+	FNuWrinkleBrushOp::FMapImage Map;
+	if (TestTrue(TEXT("The texture is read as a Wrinkle Map"), FNuWrinkleBrushOp::ReadTextureAsMap(Texture, Map)))
 	{
 		TestEqual(TEXT("The map is two texels wide"), Map.GetDimensions().GetWidth(), 2);
 		TestEqual(TEXT("and two high"), Map.GetDimensions().GetHeight(), 2);
@@ -1035,6 +1264,48 @@ bool FSculptBrushPackMorphWrinkleMapTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("The second texel of the second row is black: 0"), Map.GetPixel(1, 1), 0.0f, 0.0f);
 		// The white texel's center is at (0.75, 0.25) of the map, where the brush reads a point with those UVs.
 		TestEqual(TEXT("Read at the white texel's center, the map gives 1"), Map.BilinearSampleUV<float, UE::Geometry::EImageTilingMethod::Wrap>(FVector2d(0.75, 0.25), 0.0f), 1.0f, 0.0f);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSculptBrushPackMorphShippedMapsTest, "SculptBrushPackMorph.Brushes.WrinkleMapsOfThePlugin",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FSculptBrushPackMorphShippedMapsTest::RunTest(const FString& Parameters)
+{
+	using namespace SculptBrushPackMorph;
+
+	// The three maps that come with the plugin: each loads, is a height map and not a picture (no sRGB), and reads as a
+	// map of 1024 by 1024 values from 0 to 1 that uses that whole range.
+	for (const TCHAR* Name : { TEXT("T_WrinkleMap_Folds"), TEXT("T_WrinkleMap_Creases"), TEXT("T_WrinkleMap_Crumple") })
+	{
+		const FString Path = FString::Printf(TEXT("/SculptBrushPackMorph/WrinkleMaps/%s.%s"), Name, Name);
+		UTexture2D* Texture = LoadObject<UTexture2D>(nullptr, *Path);
+		if (!TestNotNull(FString::Printf(TEXT("%s loads"), Name), Texture))
+		{
+			continue;
+		}
+		TestFalse(FString::Printf(TEXT("%s is not sRGB"), Name), Texture->SRGB);
+		FNuWrinkleBrushOp::FMapImage Map;
+		if (TestTrue(FString::Printf(TEXT("%s is read as a Wrinkle Map"), Name), FNuWrinkleBrushOp::ReadTextureAsMap(Texture, Map)))
+		{
+			TestEqual(FString::Printf(TEXT("%s is 1024 wide"), Name), Map.GetDimensions().GetWidth(), 1024);
+			TestEqual(FString::Printf(TEXT("%s is 1024 high"), Name), Map.GetDimensions().GetHeight(), 1024);
+			float Least = 1.0f;
+			float Most = 0.0f;
+			double Sum = 0.0;
+			const int64 Count = Map.GetDimensions().Num();
+			for (int64 Index = 0; Index < Count; ++Index)
+			{
+				const float Value = Map.GetPixel(Index);
+				Least = FMath::Min(Least, Value);
+				Most = FMath::Max(Most, Value);
+				Sum += Value;
+			}
+			AddInfo(FString::Printf(TEXT("%s: values from %g to %g, %g on average."), Name, Least, Most, Count > 0 ? Sum / Count : 0.0));
+			TestTrue(FString::Printf(TEXT("%s has black in it"), Name), Least == 0.0f);
+			TestTrue(FString::Printf(TEXT("%s has white in it"), Name), Most == 1.0f);
+		}
 	}
 	return true;
 }
@@ -1071,7 +1342,7 @@ bool FSculptBrushPackMorphPosedTest::RunTest(const FString& Parameters)
 			Pose[Elbow].SetScale3D(FVector(1.0, 0.6, 0.6));
 			Tool->Tick(0.03f);
 
-			// Where the squashed forearm's surface is shortened most: measured as Wrinkle Morph measures it, with what the brushes
+			// Where the squashed forearm's surface is shortened most: measured as Nu Wrinkle measures it, with what the brushes
 			// read from the tool.
 			const UDynamicMesh* MeshObject = FMorphToolAccess::ToolMesh(MorphTool);
 			const FDynamicMesh3* Mesh = MeshObject ? MeshObject->GetMeshPtr() : nullptr;
@@ -1155,7 +1426,7 @@ bool FSculptBrushPackMorphPosedTest::RunTest(const FString& Parameters)
 			AddInfo(FString::Printf(TEXT("Of %d points, %d are more than 0.02 shorter than at rest, the most by %.4g. The most shortened one a ray can meet is point %d, %.4g shorter, at (%.3f, %.3f, %.3f)."),
 				Mesh ? Mesh->VertexCount() : 0, Shortened.Num(), Shortened.Num() > 0 ? Shortened[0].Shorter : 0.0, Most, MostShorter, MostPlace.X, MostPlace.Y, MostPlace.Z));
 
-			USculptBrushPackWrinkleMorphOpProps* WrinkleSettings = nullptr;
+			USculptBrushPackNuWrinkleOpProps* WrinkleSettings = nullptr;
 			for (UObject* Object : Tool->GetToolProperties(/*bEnabledOnly*/ false))
 			{
 				if (USculptBrushPackOpProps* Settings = Cast<USculptBrushPackOpProps>(Object))
@@ -1163,10 +1434,10 @@ bool FSculptBrushPackMorphPosedTest::RunTest(const FString& Parameters)
 					// Full weight to the brush's rim.
 					Settings->Falloff = 0.0f;
 				}
-				WrinkleSettings = WrinkleSettings ? WrinkleSettings : Cast<USculptBrushPackWrinkleMorphOpProps>(Object);
+				WrinkleSettings = WrinkleSettings ? WrinkleSettings : Cast<USculptBrushPackNuWrinkleOpProps>(Object);
 			}
-			if (TestTrue(TEXT("Squashing the forearm shortens its surface by more than Wrinkle Morph's Starts At, at a point a ray can meet"), Most != INDEX_NONE && MostShorter > 0.02)
-				&& TestNotNull(TEXT("Wrinkle Morph's settings"), WrinkleSettings) && Lift)
+			if (TestTrue(TEXT("Squashing the forearm shortens its surface by more than Nu Wrinkle's Starts At, at a point a ray can meet"), Most != INDEX_NONE && MostShorter > 0.02)
+				&& TestNotNull(TEXT("Nu Wrinkle's settings"), WrinkleSettings) && Lift)
 			{
 				auto DeltaOf = [Lift](int32 Vertex)
 				{
@@ -1205,15 +1476,17 @@ bool FSculptBrushPackMorphPosedTest::RunTest(const FString& Parameters)
 				};
 				const double HalfHeight = 0.5 * WrinkleSettings->Height;
 
-				// Wrinkle Morph, only where compressed, whole at the shortening found: the most shortened point rises by
+				// Nu Wrinkle, only where compressed, whole at the shortening found: the most shortened point rises by
 				// the Height. A point is judged to have risen when its delta moved by more than half the Height.
+				WrinkleSettings->bFolds = false;
+				WrinkleSettings->Soften = 0;
 				WrinkleSettings->StartsAt = 0.0f;
 				WrinkleSettings->FullAt = static_cast<float>(MostShorter);
 				TArray<FVector3d> Before = AllDeltas();
-				TestTrue(TEXT("Wrinkle Morph on the squashed forearm: the stroke met the mesh"), Brush(BrushID::WrinkleMorph));
+				TestTrue(TEXT("Nu Wrinkle on the squashed forearm: the stroke met the mesh"), Brush(BrushID::NuWrinkle));
 				double Moved = UE::Geometry::Distance(DeltaOf(Most), Before[Most]);
-				AddInfo(FString::Printf(TEXT("Wrinkle Morph, only where compressed: the most shortened point's delta moved by %.4g; %d points changed."), Moved, ChangedPoints(Before)));
-				TestTrue(TEXT("Wrinkle Morph raises the most shortened point of the squashed forearm"), Moved > HalfHeight);
+				AddInfo(FString::Printf(TEXT("Nu Wrinkle, only where compressed: the most shortened point's delta moved by %.4g; %d points changed."), Moved, ChangedPoints(Before)));
+				TestTrue(TEXT("Nu Wrinkle raises the most shortened point of the squashed forearm"), Moved > HalfHeight);
 
 				// The same with a real texture as the Wrinkle Map: white raises as no map does, black raises nothing.
 				auto MakeTexture = [](uint8 Value)
@@ -1225,20 +1498,73 @@ bool FSculptBrushPackMorphPosedTest::RunTest(const FString& Parameters)
 					Texture->Source.Init(4, 4, 1, 1, TSF_BGRA8, Pixels.GetData());
 					return Texture;
 				};
+				WrinkleSettings->bUseMap = true;
 				WrinkleSettings->WrinkleMap = MakeTexture(255);
 				Before = AllDeltas();
-				TestTrue(TEXT("Wrinkle Morph with a white map: the stroke met the mesh"), Brush(BrushID::WrinkleMorph));
+				TestTrue(TEXT("Nu Wrinkle with a white map: the stroke met the mesh"), Brush(BrushID::NuWrinkle));
 				Moved = UE::Geometry::Distance(DeltaOf(Most), Before[Most]);
-				AddInfo(FString::Printf(TEXT("Wrinkle Morph with a white Wrinkle Map: the point's delta moved by %.4g."), Moved));
+				AddInfo(FString::Printf(TEXT("Nu Wrinkle with a white Wrinkle Map: the point's delta moved by %.4g."), Moved));
 				TestTrue(TEXT("With a white Wrinkle Map the point rises as without a map"), Moved > HalfHeight);
 
 				WrinkleSettings->WrinkleMap = MakeTexture(0);
 				Before = AllDeltas();
-				TestTrue(TEXT("Wrinkle Morph with a black map: the stroke met the mesh"), Brush(BrushID::WrinkleMorph));
+				TestTrue(TEXT("Nu Wrinkle with a black map: the stroke met the mesh"), Brush(BrushID::NuWrinkle));
 				Moved = UE::Geometry::Distance(DeltaOf(Most), Before[Most]);
-				AddInfo(FString::Printf(TEXT("Wrinkle Morph with a black Wrinkle Map: the point's delta moved by %.4g."), Moved));
+				AddInfo(FString::Printf(TEXT("Nu Wrinkle with a black Wrinkle Map: the point's delta moved by %.4g."), Moved));
 				TestTrue(TEXT("With a black Wrinkle Map nothing rises"), Moved < HalfHeight);
-				WrinkleSettings->WrinkleMap = nullptr;
+				WrinkleSettings->bUseMap = false;
+
+				// The folds on this posed piece. A brush of the test's own, given what the tool's brushes are given, says
+				// which way it would lay them: across the way the surface is squeezed. The bone was made thinner and not
+				// shorter, so that way lies across the bone's length (its X axis), not along it.
+				{
+					FNuWrinkleBrushOp Probe(Context);
+					USculptBrushPackNuWrinkleOpProps* ProbeSettings = Prepare<FNuWrinkleBrushOp, USculptBrushPackNuWrinkleOpProps>(Probe);
+					ProbeSettings->StartsAt = 0.0f;
+					ProbeSettings->FullAt = static_cast<float>(MostShorter);
+					ProbeSettings->Soften = 0;
+					const FSculptBrushStamp ProbeStamp = MakeStamp(MostPlace);
+					Probe.BeginStroke(Mesh, ProbeStamp, {});
+					ApplyTo(Probe, *Mesh, ProbeStamp, { Most });
+					FVector3d Direction;
+					bool bInUnposedMesh = false;
+					if (TestTrue(TEXT("On the squashed forearm the folds have a direction from the compression"), Probe.GetFoldDirection(Direction, bInUnposedMesh) && bInUnposedMesh))
+					{
+						const FTransform& Bone = FMorphToolAccess::RefPose(MorphTool)[Elbow];
+						const double AlongBone = FMath::Abs(Direction.Dot(FVector3d(Bone.GetUnitAxis(EAxis::X))));
+						const double AcrossBone = FMath::Max(FMath::Abs(Direction.Dot(FVector3d(Bone.GetUnitAxis(EAxis::Y)))), FMath::Abs(Direction.Dot(FVector3d(Bone.GetUnitAxis(EAxis::Z)))));
+						AddInfo(FString::Printf(TEXT("The folds' direction is (%.3f, %.3f, %.3f): %.3f of it along the bone, %.3f across."), Direction.X, Direction.Y, Direction.Z, AlongBone, AcrossBone));
+						TestTrue(TEXT("It lies across the bone, the way the piece was squeezed, more than along it"), AcrossBone > AlongBone);
+					}
+					Probe.EndStroke(Mesh, ProbeStamp, {});
+				}
+
+				// Nu Wrinkle with its folds, through the tool, in one place: the direction comes from the compression, so
+				// the stroke need not move. Points change, and not all by the same amount.
+				WrinkleSettings->bFolds = true;
+				WrinkleSettings->Irregularity = 0.0f;
+				WrinkleSettings->Spacing = 1.0f;
+				Before = AllDeltas();
+				TestTrue(TEXT("Nu Wrinkle with folds: the stroke met the mesh"), Brush(BrushID::NuWrinkle));
+				{
+					double LeastMoved = TNumericLimits<double>::Max();
+					double MostMoved = 0.0;
+					int32 Changed = 0;
+					for (const int32 Vertex : Mesh->VertexIndicesItr())
+					{
+						const double PointMoved = UE::Geometry::Distance(DeltaOf(Vertex), Before[Vertex]);
+						if (PointMoved > 0.0)
+						{
+							++Changed;
+							LeastMoved = FMath::Min(LeastMoved, PointMoved);
+							MostMoved = FMath::Max(MostMoved, PointMoved);
+						}
+					}
+					AddInfo(FString::Printf(TEXT("Nu Wrinkle with folds 1 apart: %d points changed, by %.4g to %.4g."), Changed, Changed > 0 ? LeastMoved : 0.0, MostMoved));
+					TestTrue(TEXT("Nu Wrinkle with folds changes points of the squashed forearm"), Changed > 0);
+					TestTrue(TEXT("and not all by the same amount: there is a pattern"), MostMoved > LeastMoved);
+				}
+				WrinkleSettings->bFolds = false;
 
 				// Mush Morph on the same place: on a joined surface in a pose it can measure, and it moves the point. How
 				// far is reported; that the delta is no longer what it was is what is judged.
@@ -1267,7 +1593,7 @@ bool FSculptBrushPackMorphEditorTest::RunTest(const FString& Parameters)
 	FScopedCloneAndMirror CloneAndMirror(true);
 	TestTrue(TEXT("The plugin has its console variable for Clone Morph and Mirror Morph"), CloneAndMirror.IsFound());
 	TestTrue(TEXT("The variable is on unless switched off"), CloneAndMirror.IsOnByDefault());
-	TestTrue(TEXT("With it on the morph brushes are six"), GetBrushIdentifiers() == TArray<int32>({ BrushID::AmplifyMorph, BrushID::SmoothMorph, BrushID::MushMorph, BrushID::WrinkleMorph, BrushID::CloneMorph, BrushID::MirrorMorph }));
+	TestTrue(TEXT("With it on the morph brushes are six"), GetBrushIdentifiers() == TArray<int32>({ BrushID::AmplifyMorph, BrushID::SmoothMorph, BrushID::MushMorph, BrushID::NuWrinkle, BrushID::CloneMorph, BrushID::MirrorMorph }));
 
 	// PackLift moves every point 1 up.
 	FMorphToolSession Session;
@@ -1330,7 +1656,7 @@ bool FSculptBrushPackMorphEditorTest::RunTest(const FString& Parameters)
 				}
 				TestEqual(TEXT("Every point knows the other morph's offset"), Known, Vertices.Num());
 
-				// What Mush Morph and Wrinkle Morph read: each point's place with the pose taken off, with and without
+				// What Mush Morph and Nu Wrinkle read: each point's place with the pose taken off, with and without
 				// the edited morph, and its place in the mesh's UVs. The cube stands in its reference pose, so the
 				// unposed place without the morph is the shown place without the morph, up to the rounding of the
 				// engine's skinning; the largest difference is reported, not judged. PackLift moves every point 1 up,
@@ -1367,7 +1693,7 @@ bool FSculptBrushPackMorphEditorTest::RunTest(const FString& Parameters)
 		// as an error. Its palette holds the four other morph brushes.
 		Session.Tool->SetActiveBrushType(BrushID::MirrorMorph);
 		CloneAndMirror.Set(false);
-		TestTrue(TEXT("With the variable off the morph brushes are Amplify, Smooth, Mush and Wrinkle Morph"), GetBrushIdentifiers() == TArray<int32>({ BrushID::AmplifyMorph, BrushID::SmoothMorph, BrushID::MushMorph, BrushID::WrinkleMorph }));
+		TestTrue(TEXT("With the variable off the morph brushes are Amplify, Smooth, Mush and Nu Wrinkle"), GetBrushIdentifiers() == TArray<int32>({ BrushID::AmplifyMorph, BrushID::SmoothMorph, BrushID::MushMorph, BrushID::NuWrinkle }));
 		if (RestartTool(*this, Session))
 		{
 			TestEqual(TEXT("A tool that starts without Mirror Morph, after one left on it, starts on the engine's Move"), Session.Tool->SculptProperties->PrimaryBrushID, static_cast<int32>(EMeshVertexSculptBrushType::Move));
@@ -1597,15 +1923,15 @@ bool FSculptBrushPackMorphStrokesTest::RunTest(const FString& Parameters)
 			AddInfo(TEXT("After Smooth Morph on the other +X corner:") + Describe(RightBack));
 			TestTrue(TEXT("Smooth Morph changes the brushed corner"), DeltasOf(RightBack) != Before);
 
-			// Wrinkle Morph with Only Where Compressed off: every point of the corner rises by the Height along its
+			// Nu Wrinkle with Only Where Compressed off: every point of the corner rises by the Height along its
 			// own face's normal. A point is judged to have risen when it moved by more than half the Height, and to
 			// have stayed when it moved by less: nearer to the one than to the other.
-			USculptBrushPackWrinkleMorphOpProps* WrinkleSettings = nullptr;
+			USculptBrushPackNuWrinkleOpProps* WrinkleSettings = nullptr;
 			for (UObject* Object : Tool->GetToolProperties(/*bEnabledOnly*/ false))
 			{
-				WrinkleSettings = WrinkleSettings ? WrinkleSettings : Cast<USculptBrushPackWrinkleMorphOpProps>(Object);
+				WrinkleSettings = WrinkleSettings ? WrinkleSettings : Cast<USculptBrushPackNuWrinkleOpProps>(Object);
 			}
-			if (TestNotNull(TEXT("Wrinkle Morph's settings"), WrinkleSettings))
+			if (TestNotNull(TEXT("Nu Wrinkle's settings"), WrinkleSettings))
 			{
 				const double HalfHeight = 0.5 * WrinkleSettings->Height;
 				auto LeastAndMostMoved = [&](const TArray<int32>& Vertices, const TArray<FVector3d>& From)
@@ -1620,19 +1946,87 @@ bool FSculptBrushPackMorphStrokesTest::RunTest(const FString& Parameters)
 					return LeastAndMost;
 				};
 
+				WrinkleSettings->bFolds = false;
 				WrinkleSettings->bOnlyWhereCompressed = false;
 				Before = DeltasOf(LeftFront);
-				TestTrue(TEXT("Wrinkle Morph: the stroke met the mesh"), Brush(BrushID::WrinkleMorph, LeftFront));
-				AddInfo(TEXT("After Wrinkle Morph on a corner, Only Where Compressed off:") + Describe(LeftFront));
-				TestTrue(TEXT("Wrinkle Morph raises every point of the brushed corner by its Height"), LeastAndMostMoved(LeftFront, Before).Key > HalfHeight);
+				TestTrue(TEXT("Nu Wrinkle: the stroke met the mesh"), Brush(BrushID::NuWrinkle, LeftFront));
+				AddInfo(TEXT("After Nu Wrinkle on a corner, Only Where Compressed off:") + Describe(LeftFront));
+				TestTrue(TEXT("Nu Wrinkle raises every point of the brushed corner by its Height"), LeastAndMostMoved(LeftFront, Before).Key > HalfHeight);
 
 				// With Only Where Compressed on, on a mesh in its reference pose: nothing is compressed, nothing rises,
 				// and the brush says so once the stroke ends. The editor's tools context writes the warning to the log.
-				AddExpectedMessage(TEXT("Wrinkle Morph raises wrinkles where the posed surface is shorter than at rest"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
+				AddExpectedMessage(TEXT("Nu Wrinkle raises wrinkles where the posed surface is shorter than at rest"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
 				WrinkleSettings->bOnlyWhereCompressed = true;
 				Before = DeltasOf(LeftBack);
-				TestTrue(TEXT("Wrinkle Morph, only where compressed: the stroke met the mesh"), Brush(BrushID::WrinkleMorph, LeftBack));
-				TestTrue(TEXT("Wrinkle Morph raises nothing on a mesh in its reference pose"), LeastAndMostMoved(LeftBack, Before).Value < HalfHeight);
+				TestTrue(TEXT("Nu Wrinkle, only where compressed: the stroke met the mesh"), Brush(BrushID::NuWrinkle, LeftBack));
+				TestTrue(TEXT("Nu Wrinkle raises nothing on a mesh in its reference pose"), LeastAndMostMoved(LeftBack, Before).Value < HalfHeight);
+
+				// Nu Wrinkle with its folds on, where nothing is compressed: the folds run along the stroke, and a stroke
+				// that stays in one place has no way to lay them along. Nothing rises, and the brush says so.
+				AddExpectedMessage(TEXT("Nu Wrinkle lays its folds along the stroke here, and the stroke did not move"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
+				WrinkleSettings->bFolds = true;
+				WrinkleSettings->bOnlyWhereCompressed = false;
+				Before = DeltasOf(RightBack);
+				TestTrue(TEXT("Nu Wrinkle with folds, not dragged: the stroke met the mesh"), Brush(BrushID::NuWrinkle, RightBack));
+				TestTrue(TEXT("Nu Wrinkle with folds raises nothing until the stroke moves"), LeastAndMostMoved(RightBack, Before).Value < HalfHeight);
+
+				// Dragged strokes, from near one corner of the top toward the next: a little further in from the corners
+				// than the other strokes, so that the corners' points lie off the middle of the brush.
+				auto DownOnto = [&](const TArray<int32>& Corner)
+				{
+					const FVector3d At = Mesh->GetVertex(Corner[0]);
+					const FVector3d Inside = At + (FVector3d(Bounds.Center().X, Bounds.Center().Y, At.Z) - At) * 0.05;
+					return FRay(FVector(Inside) + FVector(0, 0, 1000), FVector(0, 0, -1));
+				};
+				auto Drag = [&](int32 Identifier, const TArray<int32>& From, const TArray<int32>& To)
+				{
+					if (From.IsEmpty() || To.IsEmpty())
+					{
+						return false;
+					}
+					Tool->SetActiveBrushType(Identifier);
+					Tool->Tick(0.03f);
+					return DragAlong(*Tool, DownOnto(From), DownOnto(To));
+				};
+				auto ChangedPoints = [&](const TArray<FVector3d>& Deltas)
+				{
+					int32 Changed = 0;
+					for (const int32 Vertex : Mesh->VertexIndicesItr())
+					{
+						Changed += DeltaOf(Vertex) != Deltas[Vertex] ? 1 : 0;
+					}
+					return Changed;
+				};
+				auto AllDeltas = [&]()
+				{
+					TArray<FVector3d> Deltas;
+					Deltas.SetNum(Mesh->MaxVertexID());
+					for (const int32 Vertex : Mesh->VertexIndicesItr())
+					{
+						Deltas[Vertex] = DeltaOf(Vertex);
+					}
+					return Deltas;
+				};
+
+				// Nu Wrinkle dragged: the folds run along the stroke, and points rise. The stroke runs a twentieth of the
+				// top's half width in from its edge, and the folds are four times that apart, so the corners' points lie a
+				// quarter of the way across a fold and not on the line between two, where nothing rises.
+				WrinkleSettings->Spacing = static_cast<float>(4.0 * 0.05 * 0.5 * (Bounds.Max.Y - Bounds.Min.Y));
+				WrinkleSettings->Irregularity = 0.0f;
+				TArray<FVector3d> BeforeDrag = AllDeltas();
+				TestTrue(TEXT("Nu Wrinkle with folds, dragged: the stroke met the mesh"), Drag(BrushID::NuWrinkle, RightBack, LeftBack));
+				int32 Dragged = ChangedPoints(BeforeDrag);
+				AddInfo(FString::Printf(TEXT("Nu Wrinkle with folds, dragged along the top: %d of the cube's points changed."), Dragged));
+				TestTrue(TEXT("Nu Wrinkle with folds lays them along a dragged stroke"), Dragged > 0);
+				WrinkleSettings->bFolds = false;
+
+				// Legacy Wrinkle, the last of the Sculpt Brush Pack's own brushes, dragged the same way in this tool: its
+				// lines follow the stroke and the points beside them move.
+				BeforeDrag = AllDeltas();
+				TestTrue(TEXT("Legacy Wrinkle, dragged: the stroke met the mesh"), Drag(SculptBrushPack::GetBrushIdentifiers().Last(), RightFront, LeftFront));
+				Dragged = ChangedPoints(BeforeDrag);
+				AddInfo(FString::Printf(TEXT("Legacy Wrinkle, dragged along the top: %d of the cube's points changed."), Dragged));
+				TestTrue(TEXT("Legacy Wrinkle cuts its lines along a dragged stroke"), Dragged > 0);
 
 				// Mush Morph on this cube cannot act, and says so. Each face of the cube is two triangles that share no
 				// point with the next face, and one round of averaging brings such a face's four points onto one line:

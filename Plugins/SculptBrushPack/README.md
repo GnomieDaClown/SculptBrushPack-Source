@@ -1,6 +1,6 @@
 # Sculpt Brush Pack
 
-An editor plugin for Unreal Engine 5.8 that adds eighteen brushes to the engine's own Vertex Sculpt tools. It has one
+An editor plugin for Unreal Engine 5.8 that adds nineteen brushes to the engine's own Vertex Sculpt tools. It has one
 editor module, depends on engine modules only, and adds no tool, mode or asset type of its own: the brushes appear in the
 brush palette of the tools you already use.
 
@@ -49,9 +49,26 @@ Setting the console variable `SculptBrushPack.Enabled` to `0` makes sculpt tools
 | Tube | Draws a bead with a round cross-section along the stroke. Ctrl cuts a round channel. | Height |
 | Noise | Shows a bump pattern that is fixed in the mesh's space: any brush size shows the same bumps. | Height, Scale |
 | Sharpen | Grows each point's own relief, bumps up and hollows down, by a set share. Ctrl takes relief away. | Amount, Detail Size |
+| LegacyWrinkle | Draws wrinkle lines along the stroke: several fine cuts side by side, each with a raised lip. Ctrl raises ridges instead. | Depth, Lines, Spread, Line Width, Lip, Pinch |
 
 Tube, Noise and Sharpen share one rule: the result of a stroke depends on where the brush went and how hard, not on how
 long it stayed. A second pass over the same place adds nothing, and a lighter pass takes nothing back.
+
+### LegacyWrinkle
+
+The wrinkle brush of the familiar kind: you draw each wrinkle where you want it, and it deepens for as long as the brush
+stays or passes again. It works on any mesh, posed or not, in all three tools.
+
+- **Lines** is how many cuts run side by side (1 to 9), and **Spread** how far from the middle of the brush the
+  outermost run. One line runs through the middle.
+- **Line Width** is a cut's width as a share of the brush radius, **Depth** how strongly it is cut, **Lip** how high
+  the surface rises beside each cut, and **Pinch** how strongly the points beside a line are drawn toward it.
+- The lines follow the way the stroke moves, so the brush draws when it is dragged: a click without a drag leaves no
+  mark.
+- The mesh needs points enough to hold lines this fine: a brush moves the points there are, and adds none.
+
+To raise wrinkles where a pose bunches the surface up, without drawing each one, see Nu Wrinkle in the Sculpt Brush
+Pack: Morph Targets plugin.
 
 ## How it gets into the tool
 
@@ -83,8 +100,8 @@ Two things the plugin does to the tool's settings, both logged under `LogSculptB
   Morph Target share, and a tool started on a brush it does not have fails an engine `ensure`. Before a tool's `Setup`,
   when the remembered brush is one this plugin or a provider added and this tool is not getting it, the engine's Move
   is remembered in its place.
-- **Freeze Target.** Nine brushes work from the surface as it was before the stroke: DamStandard, MoveTopo, Layer, Thumb,
-  TopoSlide, Relax, Tube, Noise and Sharpen. While the tool's Freeze Target is set, that surface is not refreshed, and such a
+- **Freeze Target.** Ten brushes work from the surface as it was before the stroke: DamStandard, MoveTopo, Layer, Thumb,
+  TopoSlide, Relax, Tube, Noise, Sharpen and LegacyWrinkle. While the tool's Freeze Target is set, that surface is not refreshed, and such a
   brush would undo earlier strokes under it. The plugin clears Freeze Target when one of these brushes becomes active.
 
 ## Adding brushes from another module
@@ -105,12 +122,14 @@ provider's brushes may derive from). The brushes themselves are private to the m
   and falloff, so a given strength setting is not the same strength as in Blender. Blender is licensed under the GNU
   General Public License, and for that reason this plugin is too (see "Licence").
 - Glide, Tube, Noise and Sharpen are this project's own designs.
+- LegacyWrinkle is this project's own too. It does what wrinkle brushes in sculpting programs commonly do, lines cut
+  along the stroke with a lip and a pinch, and takes no code, rule or number from any of them.
 
 ## Tests
 
 `Private/Tests/SculptBrushPackTests.cpp`, under the automation filter `SculptBrushPack`:
 
-- Thirteen tests of the brushes' rules. Each hands a brush a few stamps on a few points and compares with values worked
+- Fourteen tests of the brushes' rules. Each hands a brush a few stamps on a few points and compares with values worked
   out by hand, exactly, with no tolerance.
 - Two tests that start the tool: Vertex Sculpt in Modeling Mode, and Sculpt in the Skeletal Mesh Editor. Each checks that
   the pack's brushes follow the engine's in the palette and can each be made the active brush.
@@ -120,8 +139,9 @@ host project and runs the tests headless.
 
 ## What is not covered
 
-- The automated tests that start a tool check the palette; they make no stroke. The brushes have been tested by hand
-  in the editor by the author.
+- The automated tests that start a tool check the palette; they make no stroke. (The morph plugin's tests drag one
+  LegacyWrinkle stroke through Sculpt Morph Target and check that points moved.) The brushes have been tested by hand
+  in the editor by the author, except LegacyWrinkle, which is new and has not been tried by hand yet.
 - Untested: symmetry and alphas with these brushes, pen pressure, Freeze Target being cleared, the module being
   unloaded while a tool runs, a packaged build, engine versions other than 5.8.4.
 - The tests compare exactly, which relies on the module being built with precise floating point (set in its

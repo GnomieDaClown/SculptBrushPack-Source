@@ -919,6 +919,99 @@ double FSharpenBrushOp::FullHeight(const FSculptBrushStamp& Stamp, int32 Vertex,
 {
 	return Stamp.Direction * Amount * Relief[Vertex].Dot(Normal);
 }
+
+double FLegacyWrinkleBrushOp::Profile(double Across, int32 Lines, double Spread, double LineWidth, double Lip, double& OutLinePlace)
+{
+	// The line the point belongs to is the nearest: the one through the middle, or one of Lines spread evenly.
+	OutLinePlace = 0.0;
+	if (Lines > 1 && Spread > 0.0)
+	{
+		const double Gap = 2.0 * Spread / static_cast<double>(Lines - 1);
+		const double Index = FMath::Clamp(FMath::RoundToDouble((Across + Spread) / Gap), 0.0, static_cast<double>(Lines - 1));
+		OutLinePlace = Index * Gap - Spread;
+	}
+	if (!(LineWidth > 0.0))
+	{
+		return 0.0;
+	}
+	const double Distance = FMath::Abs(Across - OutLinePlace) / LineWidth;
+	if (Distance < 1.0)
+	{
+		return -FMath::Square(1.0 - Distance);
+	}
+	if (Distance < 2.0)
+	{
+		return Lip * (1.0 - FMath::Abs(2.0 * Distance - 3.0));
+	}
+	return 0.0;
+}
+
+void FLegacyWrinkleBrushOp::BeginStroke(const FDynamicMesh3* Mesh, const FSculptBrushStamp& Stamp, const TArray<int32>& InitialVertices)
+{
+	Moved.Init(FVector3d::ZeroVector, Mesh->MaxVertexID());
+	Along = FVector3d::ZeroVector;
+}
+
+void FLegacyWrinkleBrushOp::ApplyStamp(const FDynamicMesh3* Mesh, const FSculptBrushStamp& Stamp, const TArray<int32>& Vertices, TArray<FVector3d>& NewPositionsOut)
+{
+	const USculptBrushPackLegacyWrinkleOpProps* Props = GetPropertySetAs<USculptBrushPackLegacyWrinkleOpProps>();
+	if (Moved.Num() < Mesh->MaxVertexID())
+	{
+		Moved.SetNumZeroed(Mesh->MaxVertexID());
+	}
+	const FVector3d Normal = Stamp.LocalFrame.Z();
+	const FVector3d Center = Stamp.LocalFrame.Origin;
+
+	// The way the stroke moves: from the stamp before to this one, across the normal. A stamp that has not moved keeps
+	// the way of the one before it.
+	FVector3d Step = Center - Stamp.PrevLocalFrame.Origin;
+	Step -= Normal * Step.Dot(Normal);
+	const double StepLength = Step.Length();
+	if (StepLength > 0.0)
+	{
+		Along = Step / StepLength;
+	}
+	if (Along.IsZero())
+	{
+		for (int32 k = 0; k < Vertices.Num(); ++k)
+		{
+			NewPositionsOut[k] = Mesh->GetVertex(Vertices[k]) + Moved[Vertices[k]];
+		}
+		return;
+	}
+
+	const FVector3d Side = Normal.Cross(Along);
+	const int32 Lines = Props->Lines;
+	const double Spread = Props->Spread;
+	const double LineWidth = Props->LineWidth;
+	const double Lip = Props->Lip;
+	const double Strength = StampStrength(Stamp);
+	// A positive profile rises and a negative one sinks, unless the stroke is inverted.
+	const double Push = Stamp.Radius * Props->Depth * Stamp.Direction * Strength;
+	// The share of a point's sideways distance to its line that one stamp takes away; never more than all of it.
+	const double Draw = FMath::Min(1.0, Props->Pinch * Strength);
+
+	// Each vertex is in Vertices once, so each k writes its own entry of Moved.
+	ParallelFor(Vertices.Num(), [&](int32 k)
+	{
+		const int32 Vertex = Vertices[k];
+		// Mesh is the mesh from before the stroke: a point's line and weight are told by where it stood then.
+		const FVector3d Before = Mesh->GetVertex(Vertex);
+		const double Weight = EvaluateWeight(*this, Stamp, Before);
+		const double Across = (Before - Center).Dot(Side) / Stamp.Radius;
+		double LinePlace = 0.0;
+		const double Height = Profile(Across, Lines, Spread, LineWidth, Lip, LinePlace);
+		FVector3d Move = Normal * (Push * Weight * Height);
+		if (FMath::Abs(Across - LinePlace) < 2.0 * LineWidth)
+		{
+			// Sideways toward the line, from where the point is now.
+			const double Off = (Before + Moved[Vertex] - Center).Dot(Side) - LinePlace * Stamp.Radius;
+			Move -= Side * (Off * Draw * Weight);
+		}
+		Moved[Vertex] += Move;
+		NewPositionsOut[k] = Before + Moved[Vertex];
+	});
+}
 }
 
 USculptBrushPackSnakeHookOpProps::USculptBrushPackSnakeHookOpProps()
@@ -977,4 +1070,11 @@ USculptBrushPackSharpenOpProps::USculptBrushPackSharpenOpProps()
 {
 	// At full strength the middle of the brush gets the whole Amount.
 	Strength = 1.0f;
+}
+
+USculptBrushPackLegacyWrinkleOpProps::USculptBrushPackLegacyWrinkleOpProps()
+{
+	// The engine's Move brush's falloff (MeshMoveBrushOps.h:26 in 5.8.4): the lines run at full depth through the
+	// inner half of the brush and fade toward its rim.
+	Falloff = 0.5f;
 }

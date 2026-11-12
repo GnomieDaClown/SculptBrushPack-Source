@@ -3,7 +3,7 @@
 	"Version": 4,
 	"VersionName": "0.4.0",
 	"FriendlyName": "Sculpt Brush Pack",
-	"Description": "Adds eighteen sculpt brushes to Unreal's Vertex Sculpt tools, in Modeling Mode and in the Skeletal Mesh Editor: Clay, Clay Strips, Crease, Blob, Dam Standard, Snake Hook, Move Topological, Layer, Fill, Scrape, Nudge, Thumb, TopoSlide, Relax, Glide, Tube, Noise and Sharpen. Built and tested for Unreal Engine 5.8 on Win64.",
+	"Description": "Adds nineteen sculpt brushes to Unreal's Vertex Sculpt tools, in Modeling Mode and in the Skeletal Mesh Editor: Clay, Clay Strips, Crease, Blob, Dam Standard, Snake Hook, Move Topological, Layer, Fill, Scrape, Nudge, Thumb, TopoSlide, Relax, Glide, Tube, Noise, Sharpen and Legacy Wrinkle. Built and tested for Unreal Engine 5.8 on Win64.",
 	"Category": "Geometry",
 	"CreatedBy": "Joseph Wiginton",
 	"CreatedByURL": "",

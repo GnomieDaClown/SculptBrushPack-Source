@@ -98,6 +98,7 @@ namespace Private
 			{ BrushID::Tube, LOCTEXT("Tube", "Tube"), TEXT("Sculpt_InflateBrushVariants.svg"), &USculptBrushPackTubeOpProps::StaticClass, &MakeFactoryOf<FTubeBrushOp> },
 			{ BrushID::Noise, LOCTEXT("Noise", "Noise"), TEXT("Deform_NoiseDisplace.svg"), &USculptBrushPackNoiseOpProps::StaticClass, &MakeFactoryOf<FNoiseBrushOp> },
 			{ BrushID::Sharpen, LOCTEXT("Sharpen", "Sharpen"), TEXT("Sculpt_SculptMax.svg"), &USculptBrushPackSharpenOpProps::StaticClass, &MakeFactoryOf<FSharpenBrushOp> },
+			{ BrushID::LegacyWrinkle, LOCTEXT("LegacyWrinkle", "LegacyWrinkle"), TEXT("SubD_Crease.svg"), &USculptBrushPackLegacyWrinkleOpProps::StaticClass, &MakeFactoryOf<FLegacyWrinkleBrushOp> },
 		};
 		return Brushes;
 	}

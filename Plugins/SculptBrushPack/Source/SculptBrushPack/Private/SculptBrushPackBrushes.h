@@ -50,6 +50,7 @@ namespace SculptBrushPack
 		inline constexpr int32 Tube = 2016;
 		inline constexpr int32 Noise = 2017;
 		inline constexpr int32 Sharpen = 2018;
+		inline constexpr int32 LegacyWrinkle = 2019;
 	}
 
 	/** Sharpen's most rounds of averaging, the upper limit of its Detail Size: a stroke keeps one place per vertex and round. */
@@ -308,6 +309,41 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, Category = Sharpen, meta = (DisplayName = "Detail Size", UIMin = "1", UIMax = "8", ClampMin = "1", ClampMax = "16"))
 	int32 DetailSize = 4;
+};
+
+UCLASS()
+class USculptBrushPackLegacyWrinkleOpProps : public USculptBrushPackOpProps
+{
+	GENERATED_BODY()
+public:
+	USculptBrushPackLegacyWrinkleOpProps();
+
+	/**
+	 * How strongly the lines are cut. The lines deepen for as long as the brush stays or passes again. With Ctrl the
+	 * lines are raised as ridges instead.
+	 */
+	UPROPERTY(EditAnywhere, Category = LegacyWrinkle, meta = (DisplayName = "Depth", UIMin = "0.0", UIMax = "1.0", ClampMin = "0.0", ClampMax = "1.0"))
+	float Depth = 0.25f;
+
+	/** How many wrinkle lines the stroke lays side by side, along the way it moves. */
+	UPROPERTY(EditAnywhere, Category = LegacyWrinkle, meta = (DisplayName = "Lines", UIMin = "1", UIMax = "9", ClampMin = "1", ClampMax = "9"))
+	int32 Lines = 3;
+
+	/** How far from the middle of the brush the outermost lines run, as a share of the brush radius. */
+	UPROPERTY(EditAnywhere, Category = LegacyWrinkle, meta = (DisplayName = "Spread", UIMin = "0.0", UIMax = "1.0", ClampMin = "0.0", ClampMax = "1.0", EditCondition = "Lines > 1"))
+	float Spread = 0.5f;
+
+	/** The width of one line's cut, from its middle to its edge, as a share of the brush radius. */
+	UPROPERTY(EditAnywhere, Category = LegacyWrinkle, meta = (DisplayName = "Line Width", UIMin = "0.02", UIMax = "0.5", ClampMin = "0.01", ClampMax = "1.0"))
+	float LineWidth = 0.125f;
+
+	/** How high the surface rises beside each cut, as a share of the cut's depth. At 0 the brush cuts without raising. */
+	UPROPERTY(EditAnywhere, Category = LegacyWrinkle, meta = (DisplayName = "Lip", UIMin = "0.0", UIMax = "1.0", ClampMin = "0.0", ClampMax = "1.0"))
+	float Lip = 0.25f;
+
+	/** How strongly the points beside a line are drawn toward it, which tightens the cut. */
+	UPROPERTY(EditAnywhere, Category = LegacyWrinkle, meta = (DisplayName = "Pinch", UIMin = "0.0", UIMax = "1.0", ClampMin = "0.0", ClampMax = "1.0"))
+	float Pinch = 0.25f;
 };
 
 namespace SculptBrushPack
@@ -705,5 +741,44 @@ namespace SculptBrushPack
 		TArray<FVector3d> Relief;
 		TArray<bool> bHasRelief;
 		double Amount = 0.0;
+	};
+
+	/**
+	 * Legacy Wrinkle, the pack's own: a wrinkle brush of the familiar kind. It lays Lines wrinkle lines side by side along
+	 * the way the stroke moves, and they deepen for as long as the brush stays or passes again.
+	 *
+	 * A stamp moves a point along the stamp's normal by radius x Depth x strength x weight x profile. Strength is the
+	 * engine's own for a stamp, power x time x 6. Weight is the tool's falloff, times its alpha, where the point stood
+	 * before the stroke. Profile is the cross-section at the point's place across the stroke: with d the distance to the
+	 * nearest line as a share of Line Width, -(1 - d) squared inside the line (a cut, sharp at its middle),
+	 * Lip x (1 - |2d - 3|) from d = 1 to 2 (the surface pushed up beside the cut), and nothing beyond. A single line runs
+	 * through the middle of the brush; several are spread evenly from -Spread to Spread of the radius. Points within
+	 * twice Line Width of their line are also drawn sideways toward it, by Pinch x strength x weight of their distance,
+	 * each stamp. Ctrl turns the cuts into ridges.
+	 *
+	 * The way the stroke moves is the stamp's place less that of the stamp before it, with what lies along the normal
+	 * taken out. The first stamp of a stroke has not moved and leaves no mark: the brush draws when it is dragged.
+	 */
+	class FLegacyWrinkleBrushOp : public FMeshSculptBrushOp
+	{
+	public:
+		virtual void BeginStroke(const FDynamicMesh3* Mesh, const FSculptBrushStamp& Stamp, const TArray<int32>& InitialVertices) override;
+		virtual void ApplyStamp(const FDynamicMesh3* Mesh, const FSculptBrushStamp& Stamp, const TArray<int32>& Vertices, TArray<FVector3d>& NewPositionsOut) override;
+		virtual ESculptBrushOpTargetType GetBrushTargetType() const override { return ESculptBrushOpTargetType::TargetMesh; }
+		virtual EStampInputMeshType GetStampInputMeshType() const override { return EStampInputMeshType::BaseMesh; }
+		virtual bool UsesAlpha() const override { return true; }
+		virtual bool SupportsStrokeType(EMeshSculptStrokeType StrokeType) const override { return IsKnownStrokeType(StrokeType); }
+
+		/**
+		 * The cross-section's height at Across, a place across the stroke as a share of the radius: negative in a cut,
+		 * positive on a lip. OutLinePlace is the place of the line the point belongs to, in the same measure.
+		 */
+		static double Profile(double Across, int32 Lines, double Spread, double LineWidth, double Lip, double& OutLinePlace);
+
+	private:
+		/** What the stroke has moved each vertex by so far; the mesh handed to ApplyStamp is the one from before the stroke. */
+		TArray<FVector3d> Moved;
+		/** The way the stroke last moved, of length 1; zero until it has moved. */
+		FVector3d Along = FVector3d::ZeroVector;
 	};
 }

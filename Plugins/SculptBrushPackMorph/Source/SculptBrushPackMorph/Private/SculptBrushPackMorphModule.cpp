@@ -50,7 +50,7 @@ namespace Private
 	// Switched off, this leaves Clone Morph and Mirror Morph out of the brush palette. It is read when a tool starts.
 	static TAutoConsoleVariable<bool> CVarCloneAndMirror(
 		TEXT("SculptBrushPackMorph.CloneAndMirror"), true,
-		TEXT("true: Sculpt Morph Target tools that start get all six morph brushes. false: they get Amplify Morph, Smooth Morph, Mush Morph and Wrinkle Morph, without Clone Morph and Mirror Morph."));
+		TEXT("true: Sculpt Morph Target tools that start get all six morph brushes. false: they get Amplify Morph, Smooth Morph, Mush Morph and Nu Wrinkle, without Clone Morph and Mirror Morph."));
 
 	/**
 	 * The brushes' knowledge of the edited morph, read from the tool. One per tool, shared by its morph brushes.
@@ -528,7 +528,7 @@ namespace Private
 		OutBrushes.Add(MakeBrush<FAmplifyMorphBrushOp, USculptBrushPackAmplifyMorphOpProps>(BrushID::AmplifyMorph, LOCTEXT("AmplifyMorph", "AmplifyMorph"), Icons / TEXT("Sculpt_KelvinletScale.svg"), Context));
 		OutBrushes.Add(MakeBrush<FSmoothMorphBrushOp, USculptBrushPackSmoothMorphOpProps>(BrushID::SmoothMorph, LOCTEXT("SmoothMorph", "SmoothMorph"), Icons / TEXT("Rig_WeightSmooth.svg"), Context));
 		OutBrushes.Add(MakeBrush<FMushMorphBrushOp, USculptBrushPackMushMorphOpProps>(BrushID::MushMorph, LOCTEXT("MushMorph", "MushMorph"), Icons / TEXT("Rig_PoseBrush.svg"), Context));
-		OutBrushes.Add(MakeBrush<FWrinkleMorphBrushOp, USculptBrushPackWrinkleMorphOpProps>(BrushID::WrinkleMorph, LOCTEXT("WrinkleMorph", "WrinkleMorph"), Icons / TEXT("Deform_Wave.svg"), Context));
+		OutBrushes.Add(MakeBrush<FNuWrinkleBrushOp, USculptBrushPackNuWrinkleOpProps>(BrushID::NuWrinkle, LOCTEXT("NuWrinkle", "NuWrinkle"), Icons / TEXT("Deform_Wave.svg"), Context));
 		if (!CVarCloneAndMirror.GetValueOnGameThread())
 		{
 			return;
@@ -576,7 +576,7 @@ namespace Private
 
 TArray<int32> GetBrushIdentifiers()
 {
-	TArray<int32> Identifiers = { BrushID::AmplifyMorph, BrushID::SmoothMorph, BrushID::MushMorph, BrushID::WrinkleMorph };
+	TArray<int32> Identifiers = { BrushID::AmplifyMorph, BrushID::SmoothMorph, BrushID::MushMorph, BrushID::NuWrinkle };
 	if (Private::CVarCloneAndMirror.GetValueOnGameThread())
 	{
 		Identifiers.Append({ BrushID::CloneMorph, BrushID::MirrorMorph });

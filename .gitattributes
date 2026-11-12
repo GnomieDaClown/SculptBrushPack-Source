@@ -2,3 +2,5 @@
 *.svg text
 *.uplugin text
 *.uproject text
+*.uasset binary
+*.png binary

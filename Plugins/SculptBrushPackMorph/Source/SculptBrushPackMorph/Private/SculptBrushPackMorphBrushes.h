@@ -34,7 +34,7 @@ namespace SculptBrushPackMorph
 		inline constexpr int32 CloneMorph = 2103;
 		inline constexpr int32 MirrorMorph = 2104;
 		inline constexpr int32 MushMorph = 2105;
-		inline constexpr int32 WrinkleMorph = 2106;
+		inline constexpr int32 NuWrinkle = 2106;
 	}
 
 	/** What the mesh's symmetry gives the mirror brush for one vertex. The symmetry plane is X = 0 in the reference pose. */
@@ -230,61 +230,141 @@ public:
 	int32 Smoothing = 4;
 };
 
+/** The cross-section of Nu Wrinkle's folds. */
+UENUM()
+enum class ESculptBrushPackFoldProfile : uint8
+{
+	/** Rounded folds with a sharp crease between them, as skin folds. */
+	Rolls,
+	/** Smooth waves, rounded at the top and at the bottom. */
+	Waves,
+	/** Sharp crests with rounded hollows between them. */
+	Ridges,
+};
+
+/** Which way Nu Wrinkle's folds run. */
+UENUM()
+enum class ESculptBrushPackFoldDirection : uint8
+{
+	/** The folds lie across the way the surface is squeezed, as real folds do. Where the brush meets nothing squeezed, they run along the stroke. */
+	AcrossCompression UMETA(DisplayName = "Across Compression"),
+	/** The folds run the way the stroke first moves. */
+	AlongStroke UMETA(DisplayName = "Along Stroke"),
+};
+
 UCLASS()
-class USculptBrushPackWrinkleMorphOpProps : public USculptBrushPackOpProps
+class USculptBrushPackNuWrinkleOpProps : public USculptBrushPackOpProps
 {
 	GENERATED_BODY()
 public:
-	USculptBrushPackWrinkleMorphOpProps();
+	USculptBrushPackNuWrinkleOpProps();
 
 	/**
 	 * The wrinkle's height where it is whole, in the units the tool works in: world units (centimeters) for a mesh that
 	 * is not scaled. With Ctrl the wrinkle is cut in instead of raised.
 	 */
-	UPROPERTY(EditAnywhere, Category = WrinkleMorph, meta = (DisplayName = "Height", UIMin = "0.0", UIMax = "5.0", ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, Category = NuWrinkle, meta = (DisplayName = "Height", UIMin = "0.0", UIMax = "5.0", ClampMin = "0.0"))
 	float Height = 0.5f;
+
+	/**
+	 * Off: one stroke gives each point at most the Height, however long the brush stays, and a second pass over the same
+	 * place adds nothing. On: the wrinkle grows for as long as the brush stays or passes again, up to the Height.
+	 */
+	UPROPERTY(EditAnywhere, Category = NuWrinkle, meta = (DisplayName = "Build Up"))
+	bool bBuildUp = false;
 
 	/**
 	 * On: wrinkles rise only where the posed surface is shorter than at rest, as skin bunches up on the inside of a
 	 * bend, and by how much shorter. Off: they rise everywhere the brush goes, which is the way to use the brush on a
 	 * mesh in its reference pose.
 	 */
-	UPROPERTY(EditAnywhere, Category = WrinkleMorph, meta = (DisplayName = "Only Where Compressed"))
+	UPROPERTY(EditAnywhere, Category = Compression, meta = (DisplayName = "Only Where Compressed"))
 	bool bOnlyWhereCompressed = true;
 
 	/**
 	 * How much shorter than at rest the surface around a point must be before anything rises there: 0.02 is two
 	 * hundredths shorter. It keeps the brush off surface that is as good as at rest.
 	 */
-	UPROPERTY(EditAnywhere, Category = WrinkleMorph, meta = (DisplayName = "Starts At", UIMin = "0.0", UIMax = "0.5", ClampMin = "0.0", ClampMax = "1.0", EditCondition = "bOnlyWhereCompressed"))
+	UPROPERTY(EditAnywhere, Category = Compression, meta = (DisplayName = "Starts At", UIMin = "0.0", UIMax = "0.5", ClampMin = "0.0", ClampMax = "1.0", EditCondition = "bOnlyWhereCompressed"))
 	float StartsAt = 0.02f;
 
 	/** How much shorter than at rest the surface around a point is where the wrinkle is whole: 0.25 is a quarter shorter. */
-	UPROPERTY(EditAnywhere, Category = WrinkleMorph, meta = (DisplayName = "Full At", UIMin = "0.01", UIMax = "1.0", ClampMin = "0.0", ClampMax = "1.0", EditCondition = "bOnlyWhereCompressed"))
+	UPROPERTY(EditAnywhere, Category = Compression, meta = (DisplayName = "Full At", UIMin = "0.01", UIMax = "1.0", ClampMin = "0.0", ClampMax = "1.0", EditCondition = "bOnlyWhereCompressed"))
 	float FullAt = 0.25f;
 
 	/**
-	 * A texture that gives the wrinkles their pattern: it is read at each point's place in the mesh's UVs, and its red
-	 * channel is the share of Height the point rises by. Black leaves the point, white raises it fully. Without a map the
-	 * rise is even, and the brush's alpha alone gives it a pattern. The texture is read when the brush is first used
-	 * with it; pick the brush again after changing the texture's pixels.
+	 * How many times each point's compression is averaged with its neighbors' before it is used, which evens out a
+	 * patchy rise on a mesh whose edges are of very different lengths. 0 uses each point's own. Read when a stroke begins.
 	 */
-	UPROPERTY(EditAnywhere, Category = WrinkleMorph, meta = (DisplayName = "Wrinkle Map"))
+	UPROPERTY(EditAnywhere, Category = Compression, meta = (DisplayName = "Soften", UIMin = "0", UIMax = "4", ClampMin = "0", ClampMax = "8", EditCondition = "bOnlyWhereCompressed"))
+	int32 Soften = 1;
+
+	/**
+	 * On: the brush lays folds of its own, side by side, and needs no texture for a pattern. Off: the rise is even, and
+	 * only the Wrinkle Map and the brush's alpha shape it.
+	 */
+	UPROPERTY(EditAnywhere, Category = Folds, meta = (DisplayName = "Folds"))
+	bool bFolds = true;
+
+	/** Which way the folds run. Read with the first stamp of a stroke that needs it, and kept for the stroke. */
+	UPROPERTY(EditAnywhere, Category = Folds, meta = (DisplayName = "Direction", EditCondition = "bFolds"))
+	ESculptBrushPackFoldDirection Direction = ESculptBrushPackFoldDirection::AcrossCompression;
+
+	/**
+	 * The distance from one fold to the next, in the same units as Height. Folds finer than the mesh's own points cannot
+	 * show: a brush moves the points there are.
+	 */
+	UPROPERTY(EditAnywhere, Category = Folds, meta = (DisplayName = "Spacing", UIMin = "0.25", UIMax = "20.0", ClampMin = "0.01", EditCondition = "bFolds"))
+	float Spacing = 2.0f;
+
+	/** The folds' cross-section. */
+	UPROPERTY(EditAnywhere, Category = Folds, meta = (DisplayName = "Profile", EditCondition = "bFolds"))
+	ESculptBrushPackFoldProfile Profile = ESculptBrushPackFoldProfile::Rolls;
+
+	/**
+	 * Off: the folds rise from the surface, which stays where it was between them. On: they rise by the Height at their
+	 * middles and sink by the Height between, so that the surface keeps its level on the whole.
+	 */
+	UPROPERTY(EditAnywhere, Category = Folds, meta = (DisplayName = "Cut Between", EditCondition = "bFolds"))
+	bool bCutBetween = false;
+
+	/**
+	 * How unlike each other the folds are: at 0 all are as high as each other, at 1 a fold may be anything from nothing
+	 * to the whole Height. Which fold is how high is fixed in the mesh, so two strokes agree.
+	 */
+	UPROPERTY(EditAnywhere, Category = Folds, meta = (DisplayName = "Irregularity", UIMin = "0.0", UIMax = "1.0", ClampMin = "0.0", ClampMax = "1.0", EditCondition = "bFolds"))
+	float Irregularity = 0.25f;
+
+	/**
+	 * On: the Wrinkle Map below shapes the rise, on top of the folds where those are on. Off: the map is not read.
+	 */
+	UPROPERTY(EditAnywhere, Category = WrinkleMap, meta = (DisplayName = "Use Wrinkle Map"))
+	bool bUseMap = false;
+
+	/**
+	 * A texture that gives the wrinkles a pattern, or shapes the folds: it is read at each point's place in the mesh's
+	 * UVs, and its red channel is the share of the rise the point gets. Black leaves the point, white gives it all. The
+	 * texture is read when the brush is first used with it; pick the brush again after changing the texture's pixels.
+	 * Three maps come with the plugin, under its content's WrinkleMaps folder, and one of them stands here as an
+	 * example: T_WrinkleMap_Folds (long folds side by side), T_WrinkleMap_Creases (a net of fine creases) and
+	 * T_WrinkleMap_Crumple (deep wandering creases).
+	 */
+	UPROPERTY(EditAnywhere, Category = WrinkleMap, meta = (DisplayName = "Wrinkle Map", EditCondition = "bUseMap"))
 	TObjectPtr<UTexture2D> WrinkleMap = nullptr;
 
 	/**
-	 * For a map painted around mid grey, as displacement maps are: mid grey leaves the point, white raises it by Height
-	 * and black lowers it by Height.
+	 * For a map painted around mid grey, as displacement maps are: mid grey leaves the point, white raises it and black
+	 * lowers it.
 	 */
-	UPROPERTY(EditAnywhere, Category = WrinkleMorph, meta = (DisplayName = "Mid Grey Is Flat", EditCondition = "WrinkleMap != nullptr"))
+	UPROPERTY(EditAnywhere, Category = WrinkleMap, meta = (DisplayName = "Mid Grey Is Flat", EditCondition = "bUseMap"))
 	bool bMidGreyIsFlat = false;
 
 	/** How many times the map repeats across the mesh's UVs. */
-	UPROPERTY(EditAnywhere, Category = WrinkleMorph, meta = (DisplayName = "Map Tiling", UIMin = "0.25", UIMax = "16.0", ClampMin = "0.01", EditCondition = "WrinkleMap != nullptr"))
+	UPROPERTY(EditAnywhere, Category = WrinkleMap, meta = (DisplayName = "Map Tiling", UIMin = "0.25", UIMax = "16.0", ClampMin = "0.01", EditCondition = "bUseMap"))
 	float MapTiling = 1.0f;
 
 	/** The UV channel of the mesh the map is read with. */
-	UPROPERTY(EditAnywhere, Category = WrinkleMorph, meta = (DisplayName = "UV Channel", UIMin = "0", UIMax = "7", ClampMin = "0", ClampMax = "7", EditCondition = "WrinkleMap != nullptr"))
+	UPROPERTY(EditAnywhere, Category = WrinkleMap, meta = (DisplayName = "UV Channel", UIMin = "0", UIMax = "7", ClampMin = "0", ClampMax = "7", EditCondition = "bUseMap"))
 	int32 UVChannel = 0;
 };
 
@@ -296,6 +376,10 @@ namespace SculptBrushPackMorph
 	 * falloff x strength any stamp has given it, and stands that share of the way from its place before the stroke to the
 	 * brush's target for it. A second pass adds nothing and a lighter pass takes nothing back. The target is worked out
 	 * once per point, from the mesh as it was before the stroke.
+	 *
+	 * A brush that builds up (BuildsUp) keeps another reach: each stamp adds falloff x strength x time x 6 to it, the
+	 * engine's own speed for a stamp (MeshSculptBrushOps.h:39), up to 1. The point then comes to its target as the brush
+	 * stays or passes again.
 	 */
 	class FMorphBrushOp : public FMeshSculptBrushOp
 	{
@@ -322,12 +406,17 @@ namespace SculptBrushPackMorph
 		 * Called on the game thread once per stamp, before its points are moved: reads the settings and works out what the
 		 * points share. Mesh is the shown mesh from before the stroke, Without the same without the edited morph.
 		 */
-		virtual void PrepareStamp(const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices) {}
+		virtual void PrepareStamp(const FSculptBrushStamp& Stamp, const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices) {}
 		/**
 		 * Where a point stands at full reach. Before is its place before the stroke, Base its place without the morph.
-		 * Called from worker threads, once per point and stroke.
+		 * Called from worker threads, once per point and stroke unless IsTargetFinal says the point's target is not yet
+		 * known; then it is asked again with the next stamp, and should answer Before meanwhile.
 		 */
 		virtual FVector3d FullTarget(const FSculptBrushStamp& Stamp, int32 Vertex, const FVector3d& Before, const FVector3d& Base) const = 0;
+		/** Whether the target FullTarget gives for a point now is the one it keeps for the stroke. Called from worker threads. */
+		virtual bool IsTargetFinal(int32 Vertex) const { return true; }
+		/** Whether a point's reach grows with every stamp, up to 1, and is not the largest any stamp gave. Read once per stamp. */
+		virtual bool BuildsUp() const { return false; }
 
 		/** Whether the context let the stroke under way begin. */
 		bool IsEditable() const { return bEditable; }
@@ -353,7 +442,7 @@ namespace SculptBrushPackMorph
 		using FMorphBrushOp::FMorphBrushOp;
 
 	protected:
-		virtual void PrepareStamp(const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices) override;
+		virtual void PrepareStamp(const FSculptBrushStamp& Stamp, const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices) override;
 		virtual FVector3d FullTarget(const FSculptBrushStamp& Stamp, int32 Vertex, const FVector3d& Before, const FVector3d& Base) const override;
 
 	private:
@@ -372,7 +461,7 @@ namespace SculptBrushPackMorph
 		virtual void BeginStroke(const FDynamicMesh3* Mesh, const FSculptBrushStamp& Stamp, const TArray<int32>& InitialVertices) override;
 
 	protected:
-		virtual void PrepareStamp(const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices) override;
+		virtual void PrepareStamp(const FSculptBrushStamp& Stamp, const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices) override;
 		virtual FVector3d FullTarget(const FSculptBrushStamp& Stamp, int32 Vertex, const FVector3d& Before, const FVector3d& Base) const override;
 
 	private:
@@ -406,7 +495,7 @@ namespace SculptBrushPackMorph
 
 	protected:
 		virtual bool NeedsOffsets() const override { return true; }
-		virtual void PrepareStamp(const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices) override;
+		virtual void PrepareStamp(const FSculptBrushStamp& Stamp, const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices) override;
 		virtual FVector3d FullTarget(const FSculptBrushStamp& Stamp, int32 Vertex, const FVector3d& Before, const FVector3d& Base) const override;
 
 	private:
@@ -432,7 +521,7 @@ namespace SculptBrushPackMorph
 	protected:
 		virtual bool NeedsOffsets() const override { return true; }
 		virtual bool NeedsMirror() const override { return true; }
-		virtual void PrepareStamp(const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices) override;
+		virtual void PrepareStamp(const FSculptBrushStamp& Stamp, const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices) override;
 		virtual FVector3d FullTarget(const FSculptBrushStamp& Stamp, int32 Vertex, const FVector3d& Before, const FVector3d& Base) const override;
 
 	private:
@@ -459,7 +548,7 @@ namespace SculptBrushPackMorph
 		virtual void BeginStroke(const FDynamicMesh3* Mesh, const FSculptBrushStamp& Stamp, const TArray<int32>& InitialVertices) override;
 
 	protected:
-		virtual void PrepareStamp(const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices) override;
+		virtual void PrepareStamp(const FSculptBrushStamp& Stamp, const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices) override;
 		virtual FVector3d FullTarget(const FSculptBrushStamp& Stamp, int32 Vertex, const FVector3d& Before, const FVector3d& Base) const override;
 
 	private:
@@ -497,20 +586,35 @@ namespace SculptBrushPackMorph
 	};
 
 	/**
-	 * Wrinkle Morph. Raises wrinkles where skin bunches up in a pose. At full reach a point rises along the surface's
-	 * normal by Height times its compression times its pattern.
+	 * Nu Wrinkle. Raises wrinkles where skin bunches up in a pose, and lays them as folds across the way it is squeezed.
+	 * At full reach a point rises along the surface's normal by Height x compression x pattern.
 	 *
 	 * Compression is how much shorter the edges around the point are in the pose than at rest: the lengths of its edges in
-	 * the shown mesh without the edited morph, summed, against the same sum with the pose taken off. Nothing below Starts
-	 * At, all of it from Full At. With Only Where Compressed off it is 1 everywhere.
+	 * the shown mesh without the edited morph, summed, against the same sum with the pose taken off. Nothing up to Starts
+	 * At, all of it from Full At; then averaged with the neighbors' Soften times. With Only Where Compressed off it is 1
+	 * everywhere.
 	 *
-	 * The pattern is the Wrinkle Map read at the point's place in the mesh's UVs, where there is a map, and 1 where there
-	 * is none. The brush's alpha shapes the wrinkles as it shapes any stroke of these brushes: through each point's reach.
+	 * The pattern is the folds times the Wrinkle Map; either may be switched off, and with neither the rise is even.
+	 *  - Folds lie side by side along one direction, Spacing apart. A point's place along that direction, divided by
+	 *    Spacing, gives the fold it is in (the whole part) and how far across that fold it is (the rest, from 0 to 1). A
+	 *    tent of that, 0 at the fold's edges and 1 at its middle, is shaped by Profile: Rolls 1 - (1 - tent) squared,
+	 *    Waves tent squared x (3 - 2 tent), Ridges tent squared. With Cut Between, twice that less 1. Each fold is then
+	 *    made lower by Irregularity times a number from 0 to 1 that belongs to the fold.
+	 *  - The direction, Across Compression: the way the surface is squeezed, measured with the first stamp that meets
+	 *    squeezed surface. Every shortened edge under that stamp adds its shortening, as a share, along its own direction
+	 *    in the unposed mesh; the direction they agree on most is taken (the principal axis of their sum). A point's place
+	 *    along it is measured in the unposed mesh, so the folds are fixed in the mesh and two strokes over the same
+	 *    squeeze agree. Where nothing squeezed has been met, and with Along Stroke: the direction is across the way the
+	 *    stroke first moves, measured in the shown mesh from where the stroke began, and the folds run along the stroke.
+	 *    Until the stroke has moved, the points that need it wait, and rise with a later stamp.
+	 *  - The Wrinkle Map is read at the point's place in the mesh's UVs.
+	 * The brush's alpha shapes the wrinkles as it shapes any stroke of these brushes: through each point's reach.
 	 *
 	 * The rise is measured from the point's place before the stroke, so a stroke adds to what is there. With Ctrl the
-	 * wrinkle is cut in. A stroke that found nothing compressed under it says so when it ends.
+	 * wrinkle is cut in. With Build Up a point's reach grows with every stamp. A stroke that found nothing compressed
+	 * under it, or that needed to move to lay its folds and did not, says so when it ends.
 	 */
-	class FWrinkleMorphBrushOp : public FMorphBrushOp
+	class FNuWrinkleBrushOp : public FMorphBrushOp
 	{
 	public:
 		using FMorphBrushOp::FMorphBrushOp;
@@ -528,21 +632,45 @@ namespace SculptBrushPackMorph
 		/** How a texture is read into a map. Unset, ReadTextureAsMap is used; tests of the brush's rule set one of their own. */
 		TFunction<bool(UTexture2D*, FMapImage&)> ReadMap;
 
+		/** A fold's cross-section at Tent, which is 0 at the fold's edges and 1 at its middle. From 0 to 1. */
+		static double FoldShape(ESculptBrushPackFoldProfile Profile, double Tent);
+		/** The number from 0 to 1 that belongs to a fold and makes it lower than its neighbors, by Irregularity times it. */
+		static double FoldVariation(int64 Fold);
+
+		/** The folds' direction for the stroke under way, of length 1, and whether a point's place along it is measured in the unposed mesh. False while not yet known. */
+		bool GetFoldDirection(FVector3d& OutDirection, bool& bOutInUnposedMesh) const;
+
 	protected:
-		virtual void PrepareStamp(const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices) override;
+		virtual void PrepareStamp(const FSculptBrushStamp& Stamp, const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, const TArray<int32>& Vertices) override;
 		virtual FVector3d FullTarget(const FSculptBrushStamp& Stamp, int32 Vertex, const FVector3d& Before, const FVector3d& Base) const override;
+		virtual bool IsTargetFinal(int32 Vertex) const override { return Rise.Contains(Vertex); }
+		virtual bool BuildsUp() const override { return bBuildUp; }
 
 	private:
 		/**
-		 * The share of the wrinkle a point's compression gives it, from 0 to 1. Mesh gives the point's neighbors, Without
-		 * their places.
+		 * The share of the wrinkle a point's own compression gives it, from 0 to 1. Mesh gives the point's neighbors,
+		 * Without their places.
 		 */
-		double Compression(const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, int32 Vertex) const;
+		double Compression(const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, int32 Vertex);
+		/** That share after Round rounds of averaging with the neighbors'. Game thread only: it fills the rounds as it goes. */
+		double Softened(const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, int32 Vertex, int32 Round);
+		/** Adds to Squeeze what the shortened edges of a point say of the way the surface is squeezed there. */
+		void AddSqueeze(const FDynamicMesh3& Mesh, const FDynamicMesh3& Without, int32 Vertex);
+		/** The direction the shortened edges agree on most, when there is one. */
+		bool FindSqueezeDirection(FVector3d& OutDirection) const;
 
 		double Height = 0.0;
+		bool bBuildUp = false;
 		bool bOnlyWhereCompressed = true;
 		double StartsAt = 0.0;
 		double FullAt = 0.0;
+		int32 SoftenRounds = 0;
+		bool bFolds = false;
+		ESculptBrushPackFoldDirection Direction = ESculptBrushPackFoldDirection::AcrossCompression;
+		double Spacing = 1.0;
+		ESculptBrushPackFoldProfile Profile = ESculptBrushPackFoldProfile::Rolls;
+		bool bCutBetween = false;
+		double Irregularity = 0.0;
 		bool bMidGreyIsFlat = false;
 		double MapTiling = 1.0;
 		int32 UVChannel = 0;
@@ -552,10 +680,27 @@ namespace SculptBrushPackMorph
 		TWeakObjectPtr<UTexture2D> MapTexture;
 		bool bHasMap = false;
 
-		/** How far each point worked out so far rises at full reach, as a vector. */
+		/** How far each point whose rise is settled rises at full reach, as a vector. */
 		TMap<int32, FVector3d> Rise;
-		int32 PointsSeen = 0;
+		/** Each point's own compression, and that after each round of averaging, for the points worked out so far. */
+		TMap<int32, double> OwnCompression;
+		TArray<TMap<int32, double>> SoftenedCompression;
+		/** The points this stroke has met, each once. */
+		TSet<int32> Seen;
+
+		/** The folds' direction, once known for the stroke. */
+		bool bHasFoldDirection = false;
+		bool bFoldsInUnposedMesh = false;
+		FVector3d FoldDirection = FVector3d::ZeroVector;
+		/** Where the stroke began, from which places along a direction in the shown mesh are measured. */
+		FVector3d StrokeStart = FVector3d::ZeroVector;
+		/** The shortened edges' sum so far: xx, yy, zz, xy, xz, yz of a symmetric three by three. */
+		double Squeeze[6] = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
+		/** The points whose edges are in that sum, each once. */
+		TSet<int32> SqueezeFrom;
+
 		int32 PointsCompressed = 0;
+		bool bPointsWait = false;
 		bool bToldOfMap = false;
 	};
 }

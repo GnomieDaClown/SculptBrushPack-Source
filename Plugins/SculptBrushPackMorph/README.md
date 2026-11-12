@@ -32,29 +32,79 @@ A second pass over the same place adds nothing, and a lighter pass takes nothing
 | AmplifyMorph | Makes the morph stronger where you brush. | Brush the area. **Amount** sets how much stronger at full reach: 0.5 is half again as strong. Hold Ctrl to make it weaker instead; it stops at nothing and never turns the shape over. |
 | SmoothMorph | Smooths what the morph adds, and leaves the model's own detail alone. | Brush a hard edge of the morph to soften it. **Smoothing** sets how broadly it smooths. |
 | MushMorph | Mends what skinning does to the surface in a pose: a pinched elbow, a collapsed shoulder. The surface is evened out and the model's own detail is kept. | Pose the mesh, then brush the joint that looks wrong. **Smoothing** sets how broadly the surface is evened out: few rounds for a small pinch, more for a whole joint. On a mesh in its reference pose there is nothing to mend and the brush leaves it alone. |
-| WrinkleMorph | Raises wrinkles where the posed surface bunches up, as on the inside of a bend. | Pose the mesh, then brush where the skin compresses. **Height** is the wrinkle's height; hold Ctrl to cut it in. See "Wrinkle Morph's pattern" below for maps and alphas. |
+| NuWrinkle | Raises wrinkles where the posed surface bunches up, as on the inside of a bend, and lays them as folds across the way the surface is squeezed. | Pose the mesh, then brush where the skin compresses. **Height** is the wrinkles' height; hold Ctrl to cut them in. See "Nu Wrinkle" below. |
 
 When the edited morph target's weight is 0 a stroke cannot act, and the tool's panel shows a warning that says so.
 
-### Wrinkle Morph's pattern
+### Nu Wrinkle
 
-How much a point rises is its **compression** times its **pattern**, times Height.
+A wrinkle brush of the usual kind draws a line where you drag it; the Sculpt Brush Pack has one, LegacyWrinkle, and it
+works in this tool too. Nu Wrinkle starts from the pose instead: it measures where the surface has become shorter than
+at rest and which way it was squeezed, and raises folds there, across the squeeze. You brush the area and the pose
+decides where the wrinkles go.
 
-- **Compression.** With **Only Where Compressed** on, a point rises by how much shorter the surface around it is in the
-  pose than at rest: nothing until it is **Starts At** shorter, fully from **Full At**. Turn it off to raise wrinkles
-  everywhere the brush goes, which is also how to use the brush on a mesh in its reference pose. If a stroke finds
-  nothing compressed under it, the tool's panel says so when the stroke ends.
-- **Wrinkle Map.** A texture read at each point's place in the mesh's UVs: its red channel is the share of Height the
-  point rises by, so black leaves the point and white raises it fully. **Mid Grey Is Flat** is for maps painted around
-  mid grey, as displacement maps are: white raises, black lowers. **Map Tiling** repeats the map, and **UV Channel**
-  picks the UVs it is read with. The texture is read when the brush is first used with it; pick the brush again after
-  changing the texture's pixels. A normal map is not a height map and will not give the wrinkles it draws.
-- **The brush's alpha.** The tool's own Alpha shapes the wrinkles as it shapes any stroke of these brushes: where the
-  alpha is dark, less rises. As a stroke keeps the most each point has been given, a dragged stroke fills the alpha's
-  gaps in; to stamp an alpha's pattern, click once or use the Dots stroke type.
-- Without a map the rise is even, and compression and the alpha alone shape it.
+How much a point rises is its **compression** times its **pattern**, times **Height**.
 
-The mesh needs enough points to show a wrinkle: a brush moves the points there are, and adds none.
+**Compression**
+
+- With **Only Where Compressed** on, a point rises by how much shorter the surface around it is in the pose than at
+  rest: nothing until it is **Starts At** shorter, fully from **Full At**. If a stroke finds nothing compressed under
+  it, the tool's panel says so when the stroke ends.
+- **Soften** averages that measure with the neighbors', so that the wrinkles fade out at the edge of the squeezed area
+  instead of stopping at it. 0 leaves each point its own measure.
+- Turn Only Where Compressed off to raise wrinkles wherever the brush goes, which is also how to use the brush on a mesh
+  in its reference pose.
+
+**Folds**
+
+- With **Folds** on, the rise is laid as folds side by side, **Spacing** apart (in the mesh's units).
+- **Direction**, at Across Compression: the folds lie across the way the surface is squeezed, as skin folds do. That way
+  is measured under the first stamp that meets squeezed surface, and the folds are fixed in the mesh, so two strokes
+  over the same squeeze agree. Where nothing is squeezed, and at Along Stroke, the folds run along the stroke: drag
+  the brush, as a stroke that stays in one place cannot lay them, and the tool's panel says so.
+- **Profile** is a fold's cross-section: Rolls (round tops with sharp creases between), Waves (smooth both ways) or
+  Ridges (sharp tops with round valleys between).
+- **Cut Between** lowers the surface between the folds as much as it raises their tops, instead of only raising.
+- **Irregularity** makes each fold lower than its neighbors by its own share, so that they do not look ruled.
+- With Folds off the rise is even, and compression, the map and the alpha alone shape it.
+
+**Wrinkle Map**
+
+- With **Use Wrinkle Map** on, the texture in **Wrinkle Map** shapes the rise, on top of the folds where those are on.
+  It is read at each point's place in the mesh's UVs: its red channel is the share of the rise the point gets, so black
+  leaves the point and white raises it fully.
+- Three maps come with the plugin, in its content under `WrinkleMaps` (show plugin content in the Content Browser):
+  `T_WrinkleMap_Folds`, long folds side by side, which stands in the Wrinkle Map as an example;
+  `T_WrinkleMap_Creases`, a net of fine creases; and `T_WrinkleMap_Crumple`, deep wandering creases. Each is 1024 by
+  1024, tiles, and uses the whole range from black to white. As a map lies in the mesh's UVs and knows nothing of the
+  pose, turn Folds off when the map is to give the pattern by itself.
+- **Mid Grey Is Flat** is for maps painted around mid grey, as displacement maps are: white raises, black lowers.
+  **Map Tiling** repeats the map, and **UV Channel** picks the UVs it is read with.
+- The texture is read when the brush is first used with it; pick the brush again after changing the texture's pixels.
+  A normal map is not a height map and will not give the wrinkles it draws.
+
+**Stroke**
+
+- The rise is measured from each point's place before the stroke, so a stroke adds to what is there, and by default a
+  stroke's result does not depend on how long the brush stayed. With **Build Up** a point's rise grows the longer the
+  brush stays, up to the Height.
+- The tool's own Alpha shapes the wrinkles as it shapes any stroke of these brushes: where the alpha is dark, less
+  rises. As a stroke keeps the most each point has been given, a dragged stroke fills the alpha's gaps in; to stamp an
+  alpha's pattern, click once or use the Dots stroke type.
+
+The mesh needs enough points to show a wrinkle: a brush moves the points there are, and adds none. Folds closer
+together than the mesh's points cannot show.
+
+#### Where the wrinkle maps come from
+
+They were made in Houdini 22 with three Copernicus networks of two nodes each, at 1024 by 1024, written as 8 bit
+greyscale PNG files (`Resources/WrinkleMaps`) and imported as textures without sRGB:
+
+| Map | Made with |
+|---|---|
+| Folds | Phasor Noise (phasor wave, sine, element size 0.6, pattern turned 90 degrees, varying 0.06, tiling 2 by 2), then Remap with the output turned over |
+| Creases | Worley Noise (cell borders, element size 0.1, scaled 1.8 by 0.7, jitter 0.9, tiled), then Remap of 0 to 0.035 onto the whole range |
+| Crumple | Fractal Noise (Perlin, sharp, element size 0.3, 3 octaves, roughness 0.32, folded about 0, tiled), then Remap of 0 to 0.07 onto the whole range |
 
 ### What Mush Morph cannot do
 
@@ -64,7 +114,7 @@ not measure the surface.
 
 ## Clone Morph and Mirror Morph
 
-These two follow WrinkleMorph in the palette. To leave them out, enter `SculptBrushPackMorph.CloneAndMirror 0` in the
+These two follow NuWrinkle in the palette. To leave them out, enter `SculptBrushPackMorph.CloneAndMirror 0` in the
 console and start Sculpt Morph Target again; `1` brings them back. The variable is not kept between sessions of the
 editor.
 
@@ -110,33 +160,45 @@ reads it through a class that derives from the tool and is never created (`FMorp
 
 `Private/Tests/SculptBrushPackMorphTests.cpp`, under the automation filter `SculptBrushPackMorph`:
 
-- Six tests of the brushes' rules, compared exactly with values worked out by hand, including the warnings. Mush
+- Seven tests of the brushes' rules, compared exactly with values worked out by hand, including the warnings. Mush
   Morph's: a mesh that the pose only turns and moves is left as it is, and a bump the pose flattened gets its detail
-  back. Wrinkle Morph's: the compression, a map read at texel centers, mid grey, tiling, an alpha, and Ctrl.
+  back. Nu Wrinkle's, with an even rise: the compression, a map read at texel centers, mid grey, tiling, an alpha, and
+  Ctrl. Nu Wrinkle's folds: the three profiles, Cut Between, Spacing, Irregularity, Soften, a stroke that has to move
+  before its folds can be laid, and Build Up.
 - A test that opens the Skeletal Mesh Editor on a copy of the engine's skeletal cube with two morph targets, starts
   Sculpt Morph Target and checks the palette and what the brushes read from the tool. The palette is checked three
   times: as the plugin is set (six morph brushes), with the console variable off after a tool was left on MirrorMorph
   (four, and the tool starts on the engine's Move), and with it on again (six). It also checks that the tool gives
   every point its place with the pose taken off and its place in the UVs.
-- A test that makes a real stroke with each of the six brushes on that cube and reads the morph target back. Wrinkle Morph raises a corner with Only Where Compressed off, and with it on reports that
-  nothing is compressed. Mush Morph reports that it cannot measure the cube's separate faces, and moves nothing.
+- A test that makes a real stroke with each of the six brushes on that cube and reads the morph target back. Nu
+  Wrinkle raises a corner with Only Where Compressed off, and with it on reports that nothing is compressed; with
+  Folds on, a stroke in one place reports that it did not move, and a dragged one changes points. The Sculpt Brush
+  Pack's LegacyWrinkle is dragged the same way and changes points. Mush Morph reports that it cannot measure the cube's
+  separate faces, and moves nothing.
 - A test that leaves Sculpt Morph Target on a morph brush and then starts the plain Sculpt tool, which does not have it.
 - A test of a real texture read as a Wrinkle Map: two by two texels, one of them white, read exactly and in the right
   place.
+- A test of the three wrinkle maps that come with the plugin: each loads, is not sRGB, and reads as 1024 by 1024
+  values that reach both black and white.
 - A test on a posed mesh: the engine's tutorial character with its left forearm squashed to six tenths by scaling its
-  bone, which shortens that piece's surface by up to 0.4. Wrinkle Morph, only where compressed, raises the most
-  shortened point a ray can reach, the same with a white texture as its map, and nothing with a black one. Mush Morph
-  moves that point and the points around it.
+  bone, which shortens that piece's surface by up to 0.4. Nu Wrinkle, only where compressed, raises the most
+  shortened point a ray can reach, the same with a white texture as its map, and nothing with a black one. The folds'
+  direction there is found from the squeeze, and lies across the bone (the bone was made thinner, not shorter); a
+  stroke with Folds on changes points by differing amounts. Mush Morph moves that point and the points around it.
 
 In the plugin's repository (https://github.com/GnomieDaClown/SculptBrushPack-Source), `pwsh -File Tools/BrushPack.ps1` builds both plugins in
 their host project and runs the tests headless.
 
 ## What is not covered
 
-- **Mush Morph and Wrinkle Morph have not been run on a bent joint of a smoothly skinned mesh**, which is what they are
+- **Mush Morph and Nu Wrinkle have not been run on a bent joint of a smoothly skinned mesh**, which is what they are
   for: the engine ships no such mesh to test on. Its tutorial character is made of stiff pieces that share no points
   across a joint, so the posed test squashes one piece by scaling its bone. What that test judges is that the brushes
   act on a posed mesh through the tool, not that the result looks right. Nobody has tried them by hand.
+- **How Nu Wrinkle's folds and the three maps look on a character is not known.** The tests judge the numbers of
+  the rule and that strokes act through the tool. Spacing, the profiles and the maps' scale were chosen without seeing
+  them on a model.
+- The maps are 8 bit: 256 levels. At a large Height on a dense mesh that may show as steps.
 - The strokes in the tests are on a cube in its reference pose. Untested: a mesh with bones moved, a paused animation
   frame, part of the mesh isolated, the symmetry of a real character, pen pressure, a packaged build, engine versions
   other than 5.8.4.

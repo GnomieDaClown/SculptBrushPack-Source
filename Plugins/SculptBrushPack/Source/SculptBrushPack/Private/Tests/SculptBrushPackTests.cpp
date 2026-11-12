@@ -977,6 +977,105 @@ bool FSculptBrushPackSharpenTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSculptBrushPackLegacyWrinkleTest, "SculptBrushPack.Brushes.LegacyWrinkle",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FSculptBrushPackLegacyWrinkleTest::RunTest(const FString& Parameters)
+{
+	using namespace SculptBrushPackTestLocals;
+
+	FLegacyWrinkleBrushOp Wrinkle;
+	USculptBrushPackLegacyWrinkleOpProps* Settings = Prepare<FLegacyWrinkleBrushOp, USculptBrushPackLegacyWrinkleOpProps>(Wrinkle);
+	TestEqual(TEXT("Legacy Wrinkle's Depth is a quarter"), Settings->Depth, 0.25f, 0.0f);
+	TestEqual(TEXT("it lays three lines"), Settings->Lines, 3);
+	TestEqual(TEXT("spread over half the radius either side"), Settings->Spread, 0.5f, 0.0f);
+	TestEqual(TEXT("each an eighth of the radius wide"), Settings->LineWidth, 0.125f, 0.0f);
+	TestEqual(TEXT("with a lip of a quarter"), Settings->Lip, 0.25f, 0.0f);
+	TestEqual(TEXT("and a pinch of a quarter"), Settings->Pinch, 0.25f, 0.0f);
+	TestEqual(TEXT("Its Strength is the pack's 0.5"), Settings->Strength, 0.5f, 0.0f);
+	TestEqual(TEXT("and its Falloff 0.5"), Settings->Falloff, 0.5f, 0.0f);
+
+	// One line through the middle, a quarter of the radius wide: with a radius of 8 the cut reaches 2 either side of the
+	// line and its lips 2 further. Four points across a stroke along +X: on the line, half way out of the cut, on the
+	// lip's crest, and beyond the lip.
+	Settings->Depth = 0.5f;
+	Settings->Lines = 1;
+	Settings->LineWidth = 0.25f;
+	Settings->Lip = 0.25f;
+	Settings->Pinch = 0.0f;
+	const FDynamicMesh3 Mesh = MakePoints({ FVector3d(0, 0, 0), FVector3d(0, 1, 0), FVector3d(0, 3, 0), FVector3d(0, 5, 0) });
+
+	// A stamp that has not moved has no way to lay its lines along, and leaves no mark.
+	const FSculptBrushStamp Still = MakeStamp(FVector3d::Zero());
+	Wrinkle.BeginStroke(&Mesh, Still, {});
+	TestPoint(this, TEXT("A stamp that has not moved leaves no mark"), Apply(Wrinkle, Mesh, Still)[0], FVector3d(0, 0, 0));
+
+	// A stamp that came from (-4, 0, 0): the stroke moves along +X and the line runs through the middle. The stamp's
+	// strength is 1 x 1/8 x 6 = 0.75, so the push is radius 8 x Depth 0.5 x 0.75 = 3 where the profile is 1.
+	FSculptBrushStamp AlongX = MakeStamp(FVector3d::Zero());
+	AlongX.PrevLocalFrame = FFrame3d(FVector3d(-4, 0, 0));
+	TArray<FVector3d> Moved = Apply(Wrinkle, Mesh, AlongX);
+	TestPoint(this, TEXT("On the line the cut is 3 deep"), Moved[0], FVector3d(0, 0, -3));
+	TestPoint(this, TEXT("Half way out of the cut: a quarter of that"), Moved[1], FVector3d(0, 1, -0.75));
+	TestPoint(this, TEXT("On the lip's crest the surface rises by a quarter of the depth"), Moved[2], FVector3d(0, 3, 0.75));
+	TestPoint(this, TEXT("Beyond the lip nothing moves"), Moved[3], FVector3d(0, 5, 0));
+
+	// The lines deepen for as long as the brush stays: a second stamp in the same place, which has not moved, keeps the
+	// stroke's way and cuts as much again.
+	TestPoint(this, TEXT("A second stamp cuts as much again"), Apply(Wrinkle, Mesh, Still)[0], FVector3d(0, 0, -6));
+
+	// Inverted, the cut is a ridge and its lips are sunk; at half power everything is half as much.
+	FSculptBrushStamp Inverted = AlongX;
+	Inverted.Direction = -1.0;
+	Wrinkle.BeginStroke(&Mesh, Inverted, {});
+	Moved = Apply(Wrinkle, Mesh, Inverted);
+	TestPoint(this, TEXT("Inverted, the line is a ridge 3 high"), Moved[0], FVector3d(0, 0, 3));
+	TestPoint(this, TEXT("and its lip is sunk"), Moved[2], FVector3d(0, 3, -0.75));
+	FSculptBrushStamp Half = AlongX;
+	Half.Power = 0.5;
+	Wrinkle.BeginStroke(&Mesh, Half, {});
+	TestPoint(this, TEXT("At half power the cut is half as deep"), Apply(Wrinkle, Mesh, Half)[0], FVector3d(0, 0, -1.5));
+
+	// The tool's alpha weights the cut as its falloff does.
+	FSculptBrushStamp WithAlpha = AlongX;
+	WithAlpha.StampAlphaFunc = [](const FSculptBrushStamp&, const FVector3d&) { return 0.5; };
+	Wrinkle.BeginStroke(&Mesh, WithAlpha, {});
+	TestPoint(this, TEXT("An alpha of a half: half the cut"), Apply(Wrinkle, Mesh, WithAlpha)[0], FVector3d(0, 0, -1.5));
+
+	// Pinch draws the points beside the line toward it: a stamp takes Pinch 0.5 x strength 0.75 = 0.375 of the distance.
+	Settings->Pinch = 0.5f;
+	Wrinkle.BeginStroke(&Mesh, AlongX, {});
+	Moved = Apply(Wrinkle, Mesh, AlongX);
+	TestPoint(this, TEXT("Pinch: the point 1 from the line comes 0.375 nearer"), Moved[1], FVector3d(0, 0.625, -0.75));
+	TestPoint(this, TEXT("Pinch: the point on the line stays on it"), Moved[0], FVector3d(0, 0, -3));
+	TestPoint(this, TEXT("Pinch: a point beyond the lip is not drawn in"), Moved[3], FVector3d(0, 5, 0));
+	Settings->Pinch = 0.0f;
+
+	// Three lines, the outer ones half the radius from the middle: at 4 either side. The point at (0, 3, 0) is 1 from the
+	// line at 4, half way out of its cut.
+	Settings->Lines = 3;
+	Settings->Spread = 0.5f;
+	const FDynamicMesh3 Wide = MakePoints({ FVector3d(0, 4, 0), FVector3d(0, -4, 0), FVector3d(0, 3, 0), FVector3d(0, 0, 0) });
+	Wrinkle.BeginStroke(&Wide, AlongX, {});
+	Moved = Apply(Wrinkle, Wide, AlongX);
+	TestPoint(this, TEXT("Three lines: a line runs 4 to one side"), Moved[0], FVector3d(0, 4, -3));
+	TestPoint(this, TEXT("Three lines: and 4 to the other"), Moved[1], FVector3d(0, -4, -3));
+	TestPoint(this, TEXT("Three lines: a point 1 from the outer line is half way out of its cut"), Moved[2], FVector3d(0, 3, -0.75));
+	TestPoint(this, TEXT("Three lines: the middle line is there too"), Moved[3], FVector3d(0, 0, -3));
+
+	// The lines follow the stroke: moving along +Y, the line runs along Y, and the point 1 to its side is the one cut a
+	// quarter deep.
+	Settings->Lines = 1;
+	FSculptBrushStamp AlongY = MakeStamp(FVector3d::Zero());
+	AlongY.PrevLocalFrame = FFrame3d(FVector3d(0, -4, 0));
+	const FDynamicMesh3 Turned = MakePoints({ FVector3d(0, 3, 0), FVector3d(1, 0, 0) });
+	Wrinkle.BeginStroke(&Turned, AlongY, {});
+	Moved = Apply(Wrinkle, Turned, AlongY);
+	TestPoint(this, TEXT("Along Y: a point further along the line is cut to the full depth"), Moved[0], FVector3d(0, 3, -3));
+	TestPoint(this, TEXT("Along Y: a point 1 to the side is half way out of the cut"), Moved[1], FVector3d(1, 0, -0.75));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSculptBrushPackHookTest, "SculptBrushPack.Hook.VertexSculptInModelingMode",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 

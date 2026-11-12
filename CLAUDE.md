@@ -9,11 +9,12 @@ Repository: https://github.com/GnomieDaClown/SculptBrushPack-Source (public; the
 
 - Two Unreal Engine **editor** plugins. A release archive holds their source and prebuilt Win64 editor binaries for
   Unreal Engine 5.8, so they run without being compiled. The repository holds source only:
-  - `Plugins/SculptBrushPack` adds eighteen brushes to the engine's Vertex Sculpt tools (Modeling Mode's Vertex Sculpt, the
+  - `Plugins/SculptBrushPack` adds nineteen brushes to the engine's Vertex Sculpt tools (Modeling Mode's Vertex Sculpt, the
     Skeletal Mesh Editor's Sculpt and Sculpt Morph Target).
   - `Plugins/SculptBrushPackMorph` adds morph target brushes to Sculpt Morph Target: Amplify Morph, Smooth Morph, Mush Morph,
-    Wrinkle Morph, Clone Morph and Mirror Morph. The last two leave the palette when the console variable
-    `SculptBrushPackMorph.CloneAndMirror` is switched off. This plugin needs the first one and the engine's experimental plugin
+    Nu Wrinkle, Clone Morph and Mirror Morph. The last two leave the palette when the console variable
+    `SculptBrushPackMorph.CloneAndMirror` is switched off. It also holds content: three wrinkle maps for Nu Wrinkle, as
+    texture assets in `Content/WrinkleMaps` with their PNG files in `Resources/WrinkleMaps`. This plugin needs the first one and the engine's experimental plugin
     `SkeletalMeshMorphTargetEditingTools`, which its descriptor enables.
 - Written for **Unreal Engine 5.8**; built and tested on stock 5.8.4, Win64, MSVC. Nothing else has been tried.
 - Each plugin's `README.md` is the reference for what the brushes do, how they get into the engine's tools, how they are
@@ -87,10 +88,10 @@ arguments: `-EngineRoot <folder>`, `-Step Build` or `-Step Test`, `-Filter Sculp
 
 ```
 Build (BrushPackHost58Editor Win64 Development): exit 0, 0 errors, 0 warnings, ... s
-Tests (SculptBrushPack): 26 passed, 0 failed, of 26; editor exit 0; ... s
+Tests (SculptBrushPack): 29 passed, 0 failed, of 29; editor exit 0; ... s
 ```
 
-Twenty-six tests: fifteen under `SculptBrushPack.` and eleven under `SculptBrushPackMorph.`. Logs are in `Build/Logs`.
+Twenty-nine tests: sixteen under `SculptBrushPack.` and thirteen under `SculptBrushPackMorph.`. Logs are in `Build/Logs`.
 
 **Things that are not failures.**
 
@@ -138,8 +139,16 @@ Twenty-six tests: fifteen under `SculptBrushPack.` and eleven under `SculptBrush
 - **No binaries in git.** Never commit `Binaries` or `Intermediate`. A release archive carries prebuilt binaries, which
   `Tools/Package.ps1 -BinariesFrom` takes from a project where the same commit was built and its tests passed.
 - **Nothing personal in the repository.** No local paths, user names or addresses of the person you work for in files,
-  commit messages or release notes.
-- Identifiers of the pack's brushes are 2001 to 2018 and of the morph brushes 2101 to 2106. A brush that another module
+  commit messages or release notes. Files written by other programs carry such things without showing them: a PNG's
+  text chunks (an "Artist"), the source path inside an imported `.uasset`, the author and machine stamped on every node
+  of a Houdini scene. Search a binary file for them before you commit it.
+- **The wrinkle maps' assets** are made by importing `Plugins/SculptBrushPackMorph/Resources/WrinkleMaps/*.png` to
+  `/SculptBrushPackMorph/WrinkleMaps` in a project that has a plugin named `SculptBrushPackMorph` in its own `Plugins`
+  folder, with the console variable `Interchange.FeatureFlags.Import.PNG` at 0. Only then does the asset keep its source
+  as a path relative to itself (`../../Resources/WrinkleMaps/<name>.png`) and nothing else about where it was made.
+  Afterwards: sRGB off, compression Grayscale. The test `SculptBrushPackMorph.Brushes.WrinkleMapsOfThePlugin` loads
+  and reads all three.
+- Identifiers of the pack's brushes are 2001 to 2019 and of the morph brushes 2101 to 2106. A brush that another module
   hands the pack through `SculptBrushPack::AddBrushProvider` needs an identifier of 1000 or more that is not in use.
 
 ## Git, branches and releases
