@@ -1,0 +1,52 @@
+{
+	"FileVersion": 3,
+	"Version": 3,
+	"VersionName": "0.3.0",
+	"FriendlyName": "Sculpt Brush Pack: Morph Targets",
+	"Description": "Adds two brushes for editing morph targets to the Skeletal Mesh Editor's Sculpt Morph Target tool: Amplify Morph and Smooth Morph. It needs the Sculpt Brush Pack and Unreal's experimental Skeletal Mesh Morph Target Editing Tools. Built and tested for Unreal Engine 5.8 on Win64.",
+	"Category": "Geometry",
+	"CreatedBy": "Joseph Wiginton",
+	"CreatedByURL": "",
+	"DocsURL": "https://github.com/GnomieDaClown/SculptBrushPack",
+	"MarketplaceURL": "",
+	"SupportURL": "https://github.com/GnomieDaClown/SculptBrushPack/issues",
+	"EngineVersion": "5.8.0",
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": true,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "SculptBrushPackMorph",
+			"Type": "Editor",
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "SculptBrushPack",
+			"Enabled": true
+		},
+		{
+			"Name": "SkeletalMeshMorphTargetEditingTools",
+			"Enabled": true,
+			"TargetAllowList": [
+				"Editor"
+			]
+		},
+		{
+			"Name": "MeshModelingToolset",
+			"Enabled": true,
+			"TargetAllowList": [
+				"Editor"
+			]
+		},
+		{
+			"Name": "GeometryProcessing",
+			"Enabled": true
+		}
+	]
+}

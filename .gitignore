@@ -1,0 +1,18 @@
+# Unreal build outputs, wherever they appear (the plugins and the host project are built in place)
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+
+# Logs and release archives written by the Tools scripts
+/Build/
+
+# Written by the editor into the host project when it is opened by hand
+/Hosts/BrushPack58/Config/DefaultEditor.ini
+/Hosts/BrushPack58/Config/DefaultInput.ini
+
+# IDE files
+.vs/
+.idea/
+*.sln
+*.suo
