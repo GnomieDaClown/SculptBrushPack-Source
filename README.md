@@ -21,6 +21,11 @@ version with prebuilt binaries, which needs no compiling, is available from the 
 The brushes are part of a larger modeling suite that is still in the works, so some functionality may not be complete.
 Bug reports and feature requests are welcome in this repository's issues.
 
+## Branches
+
+`main` is the released source for Unreal Engine 5.8. `dev` is where the next version is being worked on, and may not be
+finished or stable. `5.9` is the released source ported to Unreal Engine 5.9.
+
 ## Requirements
 
 - **Unreal Engine 5.8.** Built and tested on stock 5.8.4, Win64. The build stops with a message on any other engine
@@ -49,6 +54,17 @@ Bug reports and feature requests are welcome in this repository's issues.
 
 Each plugin has automation tests, under the filters `SculptBrushPack` and `SculptBrushPackMorph` in the editor's Session
 Frontend: 22 in all.
+
+## Building and testing in this repository
+
+```
+pwsh -File Tools/BrushPack.ps1
+```
+
+builds both plugins in the host project `Hosts/BrushPack58` and runs their automation tests in a headless editor. The
+engine folder is taken from `-EngineRoot`, else from the environment variable `UE_ROOT`, else from the Epic Games
+launcher's list of installed engines. Close the Unreal editor first: the engine's build tool refuses to build while an
+editor with Live Coding is running. [`CLAUDE.md`](CLAUDE.md) holds the instructions for Claude and other coding agents.
 
 ## Licence
 

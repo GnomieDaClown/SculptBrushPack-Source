@@ -115,7 +115,7 @@ provider's brushes may derive from). The brushes themselves are private to the m
 - Two tests that start the tool: Vertex Sculpt in Modeling Mode, and Sculpt in the Skeletal Mesh Editor. Each checks that
   the pack's brushes follow the engine's in the palette and can each be made the active brush.
 
-In the plugin's repository (https://github.com/GnomieDaClown/SculptBrushPack), `pwsh -File Tools/BrushPack.ps1` builds the plugin in its
+In the plugin's repository (https://github.com/GnomieDaClown/SculptBrushPack-Source), `pwsh -File Tools/BrushPack.ps1` builds the plugin in its
 host project and runs the tests headless.
 
 ## What is not covered

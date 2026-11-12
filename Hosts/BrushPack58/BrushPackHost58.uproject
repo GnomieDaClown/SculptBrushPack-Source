@@ -1,0 +1,26 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "5.8",
+	"Category": "",
+	"Description": "Host project for building and testing the Sculpt Brush Pack and its morph target brushes on a stock Unreal Engine 5.8. It finds the two plugins in this repository's Plugins folder.",
+	"Plugins": [
+		{
+			"Name": "SculptBrushPack",
+			"Enabled": true
+		},
+		{
+			"Name": "SculptBrushPackMorph",
+			"Enabled": true
+		},
+		{
+			"Name": "ModelingToolsEditorMode",
+			"Enabled": true,
+			"TargetAllowList": [
+				"Editor"
+			]
+		}
+	],
+	"AdditionalPluginDirectories": [
+		"../../Plugins"
+	]
+}

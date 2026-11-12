@@ -91,7 +91,7 @@ reads it through a class that derives from the tool and is never created (`FMorp
   the morph target back.
 - A test that leaves Sculpt Morph Target on a morph brush and then starts the plain Sculpt tool, which does not have it.
 
-In the plugin's repository (https://github.com/GnomieDaClown/SculptBrushPack), `pwsh -File Tools/BrushPack.ps1` builds both plugins in
+In the plugin's repository (https://github.com/GnomieDaClown/SculptBrushPack-Source), `pwsh -File Tools/BrushPack.ps1` builds both plugins in
 their host project and runs the tests headless.
 
 ## What is not covered
