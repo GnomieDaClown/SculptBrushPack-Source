@@ -198,7 +198,9 @@ their host project and runs the tests headless.
 - **How Nu Wrinkle's folds and the three maps look on a character is not known.** The tests judge the numbers of
   the rule and that strokes act through the tool. Spacing, the profiles and the maps' scale were chosen without seeing
   them on a model.
-- The maps are 8 bit: 256 levels. At a large Height on a dense mesh that may show as steps.
+- The maps are 8 bit: 256 levels. At a large Height on a dense mesh that may show as steps. Their edges were measured
+  to meet as closely as neighboring texels do, except Folds' left and right edges, which differ by a little less than
+  two texels' worth: a faint line may show where that map repeats sideways.
 - The strokes in the tests are on a cube in its reference pose. Untested: a mesh with bones moved, a paused animation
   frame, part of the mesh isolated, the symmetry of a real character, pen pressure, a packaged build, engine versions
   other than 5.8.4.
